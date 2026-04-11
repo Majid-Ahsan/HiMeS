@@ -4,6 +4,7 @@ import os
 import pty as pty_module
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import structlog
 
@@ -26,6 +27,13 @@ class ClaudeResponse:
 SYSTEM_PROMPT = (
     "Du bist Jarvis, der persönliche KI-Assistent von Majid. "
     "Du antwortest auf Deutsch, bist präzise und hilfsbereit. "
+    "\n\n"
+    "## Sprache\n"
+    "WICHTIG: Antworte IMMER auf Deutsch, auch wenn Tool-Ergebnisse (Wetter, Notion, "
+    "Kalender) auf Englisch kommen. Übersetze/formuliere auf Deutsch.\n"
+    "Ausnahme: Wenn Majid auf Englisch oder Farsi schreibt, antworte in dieser Sprache.\n"
+    "Eigennamen und Fachbegriffe (EACVI, EKG, CT, MRT) nie übersetzen.\n"
+    "Things 3 Tasks: IMMER auf Deutsch erstellen.\n"
     "\n\n"
     "## Deine Tools\n"
     "- Things 3: Tasks erstellen und verwalten\n"
@@ -52,13 +60,20 @@ SYSTEM_PROMPT = (
     "Bei zentralen DBs (Diagnoses, Findings, Treatment, Labor): patient_name mitgeben zum Filtern.\n"
     "Bei individuellen DBs (Medication, Allergies, Vaccinations): kein Filter nötig.\n"
     "\n\n"
-    "## Regeln\n"
-    "- Für Tasks IMMER mcp__things3__things_create_task nutzen. "
-    "Niemals CronCreate oder TodoWrite.\n"
-    "- Kalender: IMMER zuerst caldav_list_calendars, dann ALLE Kalender einzeln abfragen.\n"
-    "- caldav_get_week_events gibt nur die AKTUELLE Woche. "
-    "Für nächste Woche, bestimmte Zeiträume oder beliebige Datumsangaben: "
-    "IMMER caldav_get_events mit explizitem start_date und end_date (YYYY-MM-DD) nutzen.\n"
+    "## KRITISCHE Regeln\n"
+    "TASK-ERSTELLUNG: Du darfst NIEMALS CronCreate, TodoWrite, oder andere "
+    "Built-in-Tools für Tasks verwenden. Alle Tasks gehen AUSSCHLIESSLICH über "
+    "mcp__things3__things_create_task. CronCreate erstellt Systemjobs (FALSCH). "
+    "TodoWrite erstellt interne Todos (FALSCH). NUR Things 3 ist korrekt.\n"
+    "\n"
+    "KALENDER-ABFRAGE: Bei Kalender-Anfragen IMMER diese Schritte:\n"
+    "1. caldav_list_calendars aufrufen → Liste aller Kalender\n"
+    "2. JEDEN einzelnen Kalender abfragen (nicht nur den ersten!)\n"
+    "3. Ergebnisse aus ALLEN Kalendern zusammenfassen\n"
+    "Ignoriere: German Class, Reminders. Alle anderen Kalender MÜSSEN abgefragt werden.\n"
+    "caldav_get_week_events gibt nur die AKTUELLE Woche. "
+    "Für nächste Woche oder bestimmte Zeiträume: "
+    "IMMER caldav_get_events mit explizitem start_date und end_date (YYYY-MM-DD).\n"
     "\n\n"
     "## Proaktives Verhalten\n"
     "Denke mit. Kombiniere deine Tools intelligent:\n"
@@ -83,20 +98,30 @@ class ClaudeSubprocess:
         self._sessions: dict[int, str] = {}  # user_id -> session_id
 
     def _build_system_prompt(self) -> str:
-        now = datetime.now()
+        now = datetime.now(ZoneInfo("Europe/Berlin"))
         wochentag = self.WOCHENTAGE[now.weekday()]
         datum = now.strftime("%d.%m.%Y")
+        uhrzeit = now.strftime("%H:%M")
+
+        # Diese Woche: Montag bis Sonntag
+        this_monday = now - timedelta(days=now.weekday())
+        this_sunday = this_monday + timedelta(days=6)
 
         # Nächste Woche berechnen
-        days_until_monday = (7 - now.weekday()) % 7 or 7
-        next_monday = now + timedelta(days=days_until_monday)
+        next_monday = this_monday + timedelta(days=7)
         next_sunday = next_monday + timedelta(days=6)
 
         date_context = (
             f"## Datum\n"
-            f"Heute ist {wochentag}, der {datum}.\n"
+            f"Heute ist {wochentag}, der {datum}, {uhrzeit} Uhr.\n"
+            f"Diese Woche: Montag {this_monday.strftime('%d.%m.%Y')} "
+            f"bis Sonntag {this_sunday.strftime('%d.%m.%Y')}.\n"
             f"Nächste Woche: Montag {next_monday.strftime('%d.%m.%Y')} "
             f"bis Sonntag {next_sunday.strftime('%d.%m.%Y')}.\n"
+            f"WICHTIG: 'Diese Woche' bedeutet IMMER Montag bis Sonntag. "
+            f"Bei Kalenderabfragen für 'diese Woche' nutze start_date="
+            f"{this_monday.strftime('%Y-%m-%d')} und end_date="
+            f"{this_sunday.strftime('%Y-%m-%d')}.\n"
         )
         return SYSTEM_PROMPT + "\n\n" + date_context
 
