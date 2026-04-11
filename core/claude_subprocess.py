@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import pty as pty_module
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -30,7 +31,26 @@ SYSTEM_PROMPT = (
     "- Things 3: Tasks erstellen und verwalten\n"
     "- CalDAV: Kalender und Termine\n"
     "- Weather: Wetterdaten weltweit (Open-Meteo/NOAA)\n"
+    "- Notion: Seiten lesen, erstellen, bearbeiten, Datenbanken abfragen (via easy-notion-mcp)\n"
     "- Memory: Persistentes Gedächtnis (MEMORY.md)\n"
+    "\n\n"
+    "## Notion-Struktur: Medical Records\n"
+    "Medical Records enthält Patientenakten der Familie. Jeder Patient hat eine eigene Seite.\n"
+    "Unter jeder Patienten-Seite sind child_databases eingebettet:\n"
+    "Diagnoses, Findings, Treatment/Procedures, Labor Parameter, Medication, "
+    "Vaccinations, Allergies, Health Metrics & Trends, Labor Trend.\n"
+    "WICHTIG: Jeder Patient hat EIGENE Datenbanken mit EIGENEN IDs!\n"
+    "Suche NIEMALS global nach 'Medication' — es gibt viele Medication-DBs für verschiedene Patienten.\n"
+    "\n"
+    "Vorgehensweise für Patientendaten:\n"
+    "1. search nach Patient-Name → erhalte Page-ID\n"
+    "2. mcp__himes-tools__notion_list_children mit der Page-ID → gibt echte child_database IDs zurück\n"
+    "3. mcp__notion__query_database mit der DB-ID aus Schritt 2\n"
+    "PFLICHT: Schritt 2 (notion_list_children) ist IMMER nötig!\n"
+    "easy-notion-mcp list_databases/search gibt falsche View-IDs zurück die nicht funktionieren.\n"
+    "NUR die IDs aus notion_list_children sind korrekt für notion_query_database_full!\n"
+    "Bei zentralen DBs (Diagnoses, Findings, Treatment, Labor): patient_name mitgeben zum Filtern.\n"
+    "Bei individuellen DBs (Medication, Allergies, Vaccinations): kein Filter nötig.\n"
     "\n\n"
     "## Regeln\n"
     "- Für Tasks IMMER mcp__things3__things_create_task nutzen. "
@@ -100,23 +120,9 @@ class ClaudeSubprocess:
         cmd.extend(["--print", prompt])
         return cmd
 
-    def _build_pty_command(self, prompt: str, user_id: int) -> list[str]:
-        """Wrap claude command in script for Linux PTY allocation."""
-        inner = self._build_command(prompt, user_id)
-        inner_str = " ".join(_shell_quote(part) for part in inner)
-        return [
-            "script", "--log-out", "/dev/stdout", "-q", "-c", inner_str,
-        ]
-
-    async def warmup(self, user_id: int) -> None:
-        """Start a throwaway session so MCP servers connect before first real prompt."""
-        logger.info("claude.warmup_start", user_id=user_id)
-        await self.send(user_id, "Antworte nur mit: bereit")
-        logger.info("claude.warmup_done", user_id=user_id, session_id=self._sessions.get(user_id))
-
     async def send(self, user_id: int, prompt: str) -> ClaudeResponse:
         response = ClaudeResponse()
-        cmd = self._build_pty_command(prompt, user_id)
+        cmd = self._build_command(prompt, user_id)
 
         logger.info(
             "claude.spawning",
@@ -126,16 +132,21 @@ class ClaudeSubprocess:
         )
 
         env = os.environ.copy()
-        # CLAUDE_CODE_OAUTH_TOKEN wird aus .env via docker-compose durchgereicht
-        # und von Claude CLI automatisch erkannt
+
+        # Allocate a PTY for stdin so Claude CLI accepts --dangerously-skip-permissions.
+        # Keep stdout/stderr as regular pipes to avoid PTY corruption of JSON output.
+        master_fd, slave_fd = pty_module.openpty()
 
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
+                stdin=slave_fd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                limit=1024 * 1024,
             )
+            os.close(slave_fd)  # child owns it now
 
             tool_call_count = 0
 
@@ -200,13 +211,18 @@ class ClaudeSubprocess:
                             break
 
                     case "result":
-                        response.cost_usd = event.get("cost_usd", 0.0)
+                        response.cost_usd = event.get("total_cost_usd", 0.0)
                         response.duration_ms = event.get("duration_ms", 0.0)
                         response.turns = event.get("num_turns", 0)
-                        # result event is the authoritative final text
                         result_text = event.get("result", "")
                         if result_text:
                             response.text = result_text
+                        # Handle max_turns exhaustion
+                        if event.get("subtype") == "error_max_turns" and not result_text:
+                            response.text = (
+                                "Die Anfrage war zu komplex und hat das Turn-Limit erreicht. "
+                                "Bitte versuche es mit einer spezifischeren Frage."
+                            )
 
                     case "error":
                         error_msg = event.get("error", {}).get("message", str(event))
@@ -238,6 +254,8 @@ class ClaudeSubprocess:
         except Exception as e:
             response.errors.append(str(e))
             logger.exception("claude.subprocess_error", user_id=user_id)
+        finally:
+            os.close(master_fd)
 
         logger.info(
             "claude.response",
@@ -259,12 +277,3 @@ class ClaudeSubprocess:
     def clear_session(self, user_id: int) -> None:
         self._sessions.pop(user_id, None)
         logger.info("claude.session_cleared", user_id=user_id)
-
-
-def _shell_quote(s: str) -> str:
-    """Simple shell quoting for subprocess command strings."""
-    if not s:
-        return "''"
-    if all(c.isalnum() or c in "-_./=" for c in s):
-        return s
-    return "'" + s.replace("'", "'\\''") + "'"

@@ -1,11 +1,19 @@
 {
   "mcpServers": {
-    "himes-memory": {
+    "himes-tools": {
       "command": "python",
       "args": ["-m", "himes_mcp.server"],
       "cwd": "/app",
       "env": {
-        "MEMORY_FILE_PATH": "/app/data/MEMORY.md"
+        "MEMORY_FILE_PATH": "/app/data/MEMORY.md",
+        "NOTION_TOKEN": "${NOTION_TOKEN}"
+      }
+    },
+    "notion": {
+      "command": "npx",
+      "args": ["-y", "easy-notion-mcp"],
+      "env": {
+        "NOTION_API_KEY": "${NOTION_TOKEN}"
       }
     },
     "things3": {
@@ -27,6 +35,13 @@
       "args": ["-y", "@dangahagan/weather-mcp@latest"],
       "env": {
         "ENABLED_TOOLS": "full"
+      }
+    },
+    "time": {
+      "command": "python",
+      "args": ["-m", "mcp_server_time"],
+      "env": {
+        "LOCAL_TIMEZONE": "Europe/Berlin"
       }
     }
   }

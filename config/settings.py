@@ -19,7 +19,7 @@ class ClaudeSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CLAUDE_")
 
     model: str = "claude-sonnet-4-20250514"
-    max_turns: int = 10
+    max_turns: int = 25
     max_tool_calls: int = 20
 
 

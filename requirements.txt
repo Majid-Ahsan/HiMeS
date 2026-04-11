@@ -12,6 +12,9 @@ mcp==1.9.2
 openai-whisper
 soundfile==0.13.1
 
+# HTTP client (Notion API for custom tools)
+httpx==0.28.1
+
 # Async utilities
 aiofiles==24.1.0
 

@@ -46,14 +46,26 @@ class Orchestrator:
 
         return app
 
+    def _render_mcp_config(self) -> None:
+        """Replace ${VAR} placeholders in mcp_config.json with env values."""
+        config_path = settings.mcp.config_path
+        template = config_path.read_text(encoding="utf-8")
+
+        replacements = {
+            "${NOTION_TOKEN}": os.environ.get("NOTION_TOKEN", ""),
+        }
+
+        rendered = template
+        for placeholder, value in replacements.items():
+            rendered = rendered.replace(placeholder, value)
+
+        config_path.write_text(rendered, encoding="utf-8")
+        logger.info("orchestrator.mcp_config_rendered")
+
     async def _handle_message(
         self, user_id: int, text: str, images: list[bytes] | None = None
     ) -> str:
         logger.info("orchestrator.message_received", user_id=user_id, text_len=len(text))
-
-        # Warmup: erste Nachricht eines Users startet Session + MCP Verbindung
-        if user_id not in self._claude._sessions:
-            await self._claude.warmup(user_id)
 
         # Images: for now log and append hint to prompt
         if images:
@@ -98,6 +110,7 @@ class Orchestrator:
                 "Generiere ein Token mit: claude setup-token"
             )
 
+        self._render_mcp_config()
         logger.info("orchestrator.starting")
 
         loop = asyncio.get_running_loop()
