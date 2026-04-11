@@ -1,0 +1,28 @@
+services:
+  himes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: himes
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data          # MEMORY.md persistence
+      - ./logs:/app/logs          # Log files
+      - ./config:/app/config      # MCP config
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    ports:
+      - "${HEALTH_PORT:-8080}:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

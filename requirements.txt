@@ -1,0 +1,26 @@
+# Telegram Bot
+python-telegram-bot==21.9
+
+# Configuration
+pydantic-settings==2.7.1
+python-dotenv==1.1.0
+
+# MCP Server
+mcp==1.9.2
+
+# Audio transcription (Voice Messages)
+openai-whisper
+soundfile==0.13.1
+
+# Async utilities
+aiofiles==24.1.0
+
+# Logging
+structlog==25.1.0
+
+# HTTP (for health checks / webhooks)
+uvicorn==0.34.0
+fastapi==0.115.12
+
+# Process management
+psutil==6.1.1

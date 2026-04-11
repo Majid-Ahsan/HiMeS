@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "himes-memory": {
+      "command": "python",
+      "args": ["-m", "mcp.server"],
+      "cwd": "/app",
+      "env": {
+        "MEMORY_FILE_PATH": "/app/data/MEMORY.md"
+      }
+    },
+    "things3": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://things-ahsan.duckdns.org/mcp"
+      ]
+    },
+    "caldav": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://caldav-ahsan.duckdns.org/sse"
+      ]
+    }
+  }
+}
