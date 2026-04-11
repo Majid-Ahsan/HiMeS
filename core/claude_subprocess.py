@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 import structlog
 
@@ -35,6 +36,9 @@ SYSTEM_PROMPT = (
     "- Für Tasks IMMER mcp__things3__things_create_task nutzen. "
     "Niemals CronCreate oder TodoWrite.\n"
     "- Kalender: IMMER zuerst caldav_list_calendars, dann ALLE Kalender einzeln abfragen.\n"
+    "- caldav_get_week_events gibt nur die AKTUELLE Woche. "
+    "Für nächste Woche, bestimmte Zeiträume oder beliebige Datumsangaben: "
+    "IMMER caldav_get_events mit explizitem start_date und end_date (YYYY-MM-DD) nutzen.\n"
     "\n\n"
     "## Proaktives Verhalten\n"
     "Denke mit. Kombiniere deine Tools intelligent:\n"
@@ -53,8 +57,28 @@ SYSTEM_PROMPT = (
 class ClaudeSubprocess:
     """Spawns Claude Code CLI as subprocess, parses stream-json events."""
 
+    WOCHENTAGE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+
     def __init__(self) -> None:
         self._sessions: dict[int, str] = {}  # user_id -> session_id
+
+    def _build_system_prompt(self) -> str:
+        now = datetime.now()
+        wochentag = self.WOCHENTAGE[now.weekday()]
+        datum = now.strftime("%d.%m.%Y")
+
+        # Nächste Woche berechnen
+        days_until_monday = (7 - now.weekday()) % 7 or 7
+        next_monday = now + timedelta(days=days_until_monday)
+        next_sunday = next_monday + timedelta(days=6)
+
+        date_context = (
+            f"## Datum\n"
+            f"Heute ist {wochentag}, der {datum}.\n"
+            f"Nächste Woche: Montag {next_monday.strftime('%d.%m.%Y')} "
+            f"bis Sonntag {next_sunday.strftime('%d.%m.%Y')}.\n"
+        )
+        return SYSTEM_PROMPT + "\n\n" + date_context
 
     def _build_command(self, prompt: str, user_id: int) -> list[str]:
         cmd = [
@@ -65,7 +89,7 @@ class ClaudeSubprocess:
             "--model", settings.claude.model,
             "--max-turns", str(settings.claude.max_turns),
             "--mcp-config", str(settings.mcp.config_path),
-            "--system-prompt", SYSTEM_PROMPT,
+            "--system-prompt", self._build_system_prompt(),
         ]
 
         # Resume existing session
