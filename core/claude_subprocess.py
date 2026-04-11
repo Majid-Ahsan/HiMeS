@@ -24,12 +24,29 @@ class ClaudeResponse:
 SYSTEM_PROMPT = (
     "Du bist Jarvis, der persönliche KI-Assistent von Majid. "
     "Du antwortest auf Deutsch, bist präzise und hilfsbereit. "
-    "Du hast Zugriff auf Things 3 für Tasks, ein Gedächtnis-System "
-    "und den Kalender via CalDAV MCP für Termine anzeigen, erstellen und bearbeiten. "
-    "Für Tasks IMMER mcp__things3__things_create_task nutzen. "
-    "Niemals CronCreate oder TodoWrite für persönliche Tasks. "
-    "Kalender: IMMER zuerst caldav_list_calendars aufrufen, dann ALLE Kalender "
-    "einzeln mit caldav_get_events abfragen. Nie nur den ersten Kalender nutzen."
+    "\n\n"
+    "## Deine Tools\n"
+    "- Things 3: Tasks erstellen und verwalten\n"
+    "- CalDAV: Kalender und Termine\n"
+    "- Weather: Wetterdaten weltweit (Open-Meteo/NOAA)\n"
+    "- Memory: Persistentes Gedächtnis (MEMORY.md)\n"
+    "\n\n"
+    "## Regeln\n"
+    "- Für Tasks IMMER mcp__things3__things_create_task nutzen. "
+    "Niemals CronCreate oder TodoWrite.\n"
+    "- Kalender: IMMER zuerst caldav_list_calendars, dann ALLE Kalender einzeln abfragen.\n"
+    "\n\n"
+    "## Proaktives Verhalten\n"
+    "Denke mit. Kombiniere deine Tools intelligent:\n"
+    "- Termin in anderer Stadt? → Automatisch Wetter für den Ort und Tag abfragen.\n"
+    "- Task mit Deadline? → Prüfe ob Kalender-Konflikte bestehen.\n"
+    "- Frage nach dem Tag? → Termine UND Tasks für heute zusammen anzeigen.\n"
+    "- Reise-Termin? → Wetter am Zielort + offene Tasks vor Abreise zeigen.\n"
+    "- Neuer Termin erstellt? → Relevante Tasks vorschlagen oder erinnern.\n"
+    "\n"
+    "Liefere immer den vollen Kontext, ohne dass Majid extra nachfragen muss. "
+    "Wenn du aus einem Tool-Ergebnis erkennst, dass ein anderes Tool nützlich wäre, "
+    "nutze es direkt."
 )
 
 
@@ -44,8 +61,7 @@ class ClaudeSubprocess:
             "claude",
             "--output-format", "stream-json",
             "--verbose",
-            "--permission-mode", "acceptEdits",
-            "--allowedTools", "mcp__things3__*,mcp__himes-memory__*,mcp__caldav__*",
+            "--dangerously-skip-permissions",
             "--model", settings.claude.model,
             "--max-turns", str(settings.claude.max_turns),
             "--mcp-config", str(settings.mcp.config_path),
@@ -123,6 +139,21 @@ class ClaudeSubprocess:
                             self._sessions[user_id] = sid
                             response.session_id = sid
                             logger.info("claude.session", user_id=user_id, session_id=sid)
+
+                        # Check MCP server status — drop session if any failed
+                        mcp_servers = event.get("mcp_servers", [])
+                        for srv in mcp_servers:
+                            logger.info(
+                                "claude.mcp_status",
+                                name=srv.get("name"),
+                                status=srv.get("status"),
+                            )
+                        failed = [s["name"] for s in mcp_servers if s.get("status") == "failed"]
+                        if failed:
+                            logger.warning("claude.mcp_failed", servers=failed, user_id=user_id)
+                            # Don't resume this broken session next time
+                            self._sessions.pop(user_id, None)
+                            response.session_id = ""
 
                     case "assistant":
                         message = event.get("message", {})

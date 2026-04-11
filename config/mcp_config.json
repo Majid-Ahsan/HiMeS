@@ -2,7 +2,7 @@
   "mcpServers": {
     "himes-memory": {
       "command": "python",
-      "args": ["-m", "mcp.server"],
+      "args": ["-m", "himes_mcp.server"],
       "cwd": "/app",
       "env": {
         "MEMORY_FILE_PATH": "/app/data/MEMORY.md"
@@ -21,6 +21,13 @@
         "mcp-remote",
         "https://caldav-ahsan.duckdns.org/sse"
       ]
+    },
+    "weather": {
+      "command": "npx",
+      "args": ["-y", "@dangahagan/weather-mcp@latest"],
+      "env": {
+        "ENABLED_TOOLS": "full"
+      }
     }
   }
 }
