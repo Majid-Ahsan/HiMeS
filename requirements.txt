@@ -15,6 +15,9 @@ soundfile==0.13.1
 # HTTP client (Notion API for custom tools)
 httpx==0.28.1
 
+# Async HTTP client (media download for Telegram)
+aiohttp>=3.11.16,<4
+
 # Async utilities
 aiofiles==24.1.0
 
