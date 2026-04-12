@@ -53,6 +53,8 @@ class Orchestrator:
 
         replacements = {
             "${NOTION_TOKEN}": os.environ.get("NOTION_TOKEN", ""),
+            "${DB_API_CLIENT_ID}": os.environ.get("DB_API_CLIENT_ID", ""),
+            "${DB_API_CLIENT_SECRET}": os.environ.get("DB_API_CLIENT_SECRET", ""),
         }
 
         rendered = template

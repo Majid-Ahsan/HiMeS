@@ -26,8 +26,8 @@ COPY . .
 # Non-root user (Claude CLI verweigert --dangerously-skip-permissions als root)
 RUN useradd -m -u 1000 himes
 
-# Persistent dirs
-RUN mkdir -p /app/data /app/logs && chown -R himes:himes /app/data /app/logs
+# Persistent dirs + fix permissions for all app files
+RUN mkdir -p /app/data /app/logs && chown -R himes:himes /app
 
 USER himes
 
