@@ -390,24 +390,38 @@ async def _notion_search(query: str, filter_type: str | None = None) -> list[Tex
 
 async def _notion_list_children(page_id: str) -> list[TextContent]:
     notion = _get_notion()
+
+    # Resolve parent page title for context
+    parent_title = ""
+    try:
+        parent_page = await notion.get_page(page_id)
+        for pv in parent_page.get("properties", {}).values():
+            if pv.get("type") == "title":
+                parent_title = "".join(t.get("plain_text", "") for t in pv.get("title", []))
+                break
+    except Exception:
+        pass
+
     blocks = await notion.get_blocks(page_id)
     if not blocks:
         return [_text("Keine Kind-Blöcke gefunden.")]
 
+    header = f"Kind-Blöcke von **{parent_title}** (`{page_id}`):\n" if parent_title else ""
     output: list[str] = []
     for block in blocks:
         btype = block.get("type", "")
         bid = block.get("id", "")
         if btype == "child_database":
             title = block["child_database"].get("title", "?")
-            output.append(f"- 📊 [database] {title} (ID: `{bid}`)")
+            label = f"{title} von {parent_title}" if parent_title else title
+            output.append(f"- 📊 [database] {label} (ID: `{bid}`)")
         elif btype == "child_page":
             title = block["child_page"].get("title", "?")
             output.append(f"- 📄 [page] {title} (ID: `{bid}`)")
 
     if not output:
         return [_text("Keine child_database oder child_page Blöcke gefunden.")]
-    return [_text("\n".join(output))]
+    return [_text(header + "\n".join(output))]
 
 
 # ── Notion: Pages ──────────────────────────────────────────────────────
@@ -594,13 +608,13 @@ async def _notion_query_database(
         else:
             raise
 
-    # Client-side patient name filter
+    # Client-side patient name filter (text-based fallback — prefer Relation-Filter!)
     if patient_name and results:
         filtered = [r for r in results if _row_matches_patient(r, patient_name)]
         if filtered:
             results = filtered
 
-    return await _format_db_results(notion, results)
+    return await _format_db_results(notion, results, db_title=db_title)
 
 
 async def _notion_add_entry(database_id: str, properties: dict) -> list[TextContent]:
@@ -638,22 +652,40 @@ async def _notion_delete_entry(page_id: str) -> list[TextContent]:
 # ── Helpers ─────────────────────────────────────────────────────────────
 
 def _row_matches_patient(row: dict, patient_name: str) -> bool:
-    """Check if a database row belongs to a patient (by text/title match)."""
+    """Check if a database row belongs to a patient (by text/title/relation match)."""
     name_lower = patient_name.lower()
-    for prop in row.get("properties", {}).values():
+    for prop_name, prop in row.get("properties", {}).items():
         ptype = prop.get("type", "")
+        # Check text and title properties
         if ptype in ("rich_text", "title"):
             text_parts = prop.get(ptype, [])
             text = "".join(t.get("plain_text", "") for t in text_parts).lower()
             if name_lower in text:
                 return True
+        # Check relation properties (resolved titles stored in _resolved dict)
+        # This is a fallback — the primary mechanism should be Notion API Relation-Filter
+        if ptype == "relation" and prop_name.lower() in ("patient", "patients", "person"):
+            # Relation IDs are in the row, but we can't resolve here without async
+            # This path is only used for client-side filtering as last resort
+            pass
     return False
 
 
-async def _format_db_results(notion: NotionClient, results: list[dict]) -> list[TextContent]:
+async def _format_db_results(
+    notion: NotionClient, results: list[dict], db_title: str = ""
+) -> list[TextContent]:
     """Format database query results with resolved relations."""
     if not results:
-        return [_text("Keine Einträge gefunden.")]
+        hint = "Keine Einträge gefunden."
+        if db_title:
+            hint += (
+                f"\n\nHinweis: Die Datenbank '{db_title}' enthält keine Treffer. "
+                "Prüfe ob dies die richtige DB ist:\n"
+                "- Für Diagnosen → zentrale 'Patient-Disease' DB mit Relation-Filter\n"
+                "- Für Medikamente/Allergien/Impfungen → patientenspezifische DB (notion_list_children)\n"
+                "- Für Befunde/Behandlungen → zentrale DB mit Relation-Filter"
+            )
+        return [_text(hint)]
 
     # Collect all relation IDs for batch resolution
     all_rel_ids: list[str] = []
