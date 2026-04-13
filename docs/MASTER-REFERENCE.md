@@ -1,5 +1,5 @@
 # HiMeS — MASTER REFERENCE
-> **Version:** v15 · **Stand:** 2026-04-13 · **Pfad:** `docs/MASTER-REFERENCE.md`
+> **Version:** v16 · **Stand:** 2026-04-13 · **Pfad:** `docs/MASTER-REFERENCE.md`
 > **Nutzung:** `Lies docs/MASTER-REFERENCE.md und fahre fort mit Phase [X.Y]: [Task].`
 > **Nach Task:** Status in dieser Datei updaten + committen.
 
@@ -161,6 +161,8 @@ himes/
 | Google Maps | HOCH | stdio TS | Ja | Routen, Places, Entfernungen |
 | ~~Deutsche Bahn~~ | ~~HOCH~~ | ~~stdio/SSE~~ | ~~Ja~~ | ✅ Implementiert (himes_db) |
 | Home Assistant | HOCH | SSE/HTTP Python | Ja (Token) | Smart Home steuern |
+| CardDAV (dav-mcp) | HOCH | stdio TS | Nein (iCloud Auth) | Kontakte lesen/erstellen/suchen via iCloud CardDAV. Für: Visitenkarten, Kontaktkarten, "Wie ist Nedas Nummer?" |
+| Google Drive | HOCH | SSE/HTTP TS | Ja (OAuth) | Dateien suchen/hochladen/organisieren. Für: Dokument-Ablage, Personal Vault, "Schick mir mein Dokument X" |
 
 ### Später (MITTEL → OPTIONAL)
 
@@ -220,7 +222,7 @@ Neda 7. Juli · Hossein 17. Juli · Majid 23. Juli · Taha 21. Oktober
 ## 7. PHASE 1 — ERLEDIGT
 
 1. requirements.txt · docker-compose.yml · Dockerfile (Python 3.11, Node.js 20, Claude CLI, non-root)
-2. config/settings.py (Pydantic) · mcp_config.json (5 MCP Server)
+2. config/settings.py (Pydantic) · mcp_config.json (6 MCP Server)
 3. input/telegram_adapter.py · himes_mcp/server.py · core/orchestrator.py · core/claude_subprocess.py
 4. Proaktiver System Prompt (Tool-Crossover) · Dynamisches Datum · MCP Health Check
 5. --dangerously-skip-permissions · OAuth Fix · Deploy-Workflow (rsync + docker compose)
@@ -243,8 +245,11 @@ Neda 7. Juli · Hossein 17. Juli · Majid 23. Juli · Taha 21. Oktober
 | 2.9 | Dynamic MCP | 2.6 | GitHub | Tools erkennen + installieren |
 | 2.10 | Multi-User | 2.2 | — | /users/{id}/ |
 | 2.11 | Morning Report | — | Time, Weather, CalDAV, Things3 | 06:00 Telegram: Wetter+Termine+Tasks+Bahn |
+| 2.12 | Telegram Mini App | 2.11 | — | PWA in Telegram für Rich UI: Dashboards, Kalender, Task-Board, Settings. Telegram bleibt Chat, Mini App für visuelle Interaktion |
+| 2.13 | Intelligent Document Processing | — | CardDAV, Google Drive | Foto/PDF → automatisch handeln: Dienstplan→Kalender, Visitenkarte→Kontakt, Arztbrief→Notion+Kalender, Rechnung→Google Drive. Claude Vision eingebaut |
+| 2.14 | Personal Vault | — | Google Drive | iCloud↔Google Drive Sync + Google Drive MCP = universeller Dateizugriff. "Schick mir meinen Personalausweis" → sucht in Drive → sendet per Telegram |
 
-Parallel: HOCH-MCPs einrichten (Gmail, Notion, Maps, DB, HA)
+Parallel: HOCH-MCPs einrichten (Gmail, Google Drive, CardDAV, Maps, HA)
 
 ---
 
@@ -297,6 +302,8 @@ Async throughout · Kein Hardcoding (.env) · Logging (structlog) · Circuit Bre
 | 012 | pty.openpty() statt script-Wrapper (kein JSON-Corruption) | Aktiv |
 | 013 | ~~Hybrid Notion: easy-notion-mcp + custom Tools~~ → Ersetzt durch ADR-014 | Ersetzt |
 | 014 | Notion Native: eigener Python-Client statt easy-notion-mcp (14 Tools, Relation-Auflösung, Schema-Cache, Markdown I/O, keine externe Dependency) | Aktiv |
+| 015 | 3-Layer Memory: Short-term MEMORY.md + Mid-term Cognee Graph + Long-term Rules. Skaliert besser als flaches 2-Dateien-System, semantischer Graph baut Beziehungen auf, Rules ändern sich selten | Geplant |
+| 016 | Google Drive als Dateispeicher statt iCloud-Direktzugriff. iCloud hat keine API, Google Drive MCP existiert, iCloud↔Drive Sync als Brücke | Geplant |
 
 ---
 
@@ -508,3 +515,4 @@ Regeln: Async, Logging, .env-konfigurierbar.
 | 2026-04-13 | 13 | Phase 1.5.14 ✅: 5 Notion Query Bugs gefixt. System Prompt: Zentral vs. patientenspezifisch DB-Zuordnung, deterministische 3-Schritt Query-Strategie, IMMER Relation-Filter bei zentralen DBs, Fallback-Kette bei 0 Ergebnissen. server.py: Hinweis mit DB-Typ-Empfehlung bei leerem Ergebnis, Parent-Page-Titel in list_children Ausgabe. |
 | 2026-04-13 | 14 | Phase 1.5.15 ✅: 3 Kalender-Bugs gefixt. CalDAV client.py: EventCreationResult erweitert (location, description, attendees, reminders_count), ORGANIZER-Feld für iMIP-Einladungen (CALDAV_ORGANIZER_EMAIL/NAME aus .env), METHOD:REQUEST im VCALENDAR. CalDAV server.py: location_geo Parameter im Tool-Schema. System Prompt: Anweisung location_geo zu nutzen + Bestätigungsdetails nach Erstellung. |
 | 2026-04-13 | 15 | CalDAV Auto-Geocoding: Nominatim-Integration für automatische Adressauflösung (Ortsname→Straße+PLZ+Stadt+Koordinaten). GEO-Property statt X-APPLE-STRUCTURED-LOCATION (iCloud escaped Komma in geo-URI). LOCATION mit "Name\nAdresse" Format. iPhone zeigt Karte+Pin korrekt. caldav-mcp lokal gespiegelt (/caldav-mcp/). |
+| 2026-04-13 | 16 | Phase 2 Roadmap erweitert: +2.12 Telegram Mini App, +2.13 Intelligent Document Processing (Claude Vision), +2.14 Personal Vault (Google Drive). MCP-Katalog: +CardDAV (dav-mcp), +Google Drive. ADR-015 (3-Layer Memory), ADR-016 (Google Drive statt iCloud). |
