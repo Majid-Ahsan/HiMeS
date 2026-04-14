@@ -100,15 +100,38 @@ class Orchestrator:
     }
 
     async def _handle_message(
-        self, user_id: int, text: str, images: list[bytes] | None = None
+        self, user_id: int, text: str, attachments: list[str] | None = None
     ) -> str:
         logger.info("orchestrator.message_received", user_id=user_id, text_len=len(text))
 
-        # Images: for now log and append hint to prompt
-        if images:
-            logger.info("orchestrator.images_received", user_id=user_id, count=len(images))
-            text += "\n\n[Bild wurde angehängt – Bildverarbeitung kommt in Phase 2]"
+        # Append file references so Claude can read them with its Read tool
+        if attachments:
+            logger.info(
+                "orchestrator.attachments_received",
+                user_id=user_id,
+                count=len(attachments),
+                files=attachments,
+            )
+            file_refs = "\n".join(
+                f"- {path}" for path in attachments
+            )
+            text += (
+                f"\n\n[Der User hat folgende Dateien gesendet. "
+                f"Lies sie mit dem Read-Tool:]\n{file_refs}"
+            )
 
+        try:
+            return await self._process_claude(user_id, text)
+        finally:
+            # Cleanup temp files after processing
+            if attachments:
+                for path in attachments:
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
+
+    async def _process_claude(self, user_id: int, text: str) -> str:
         response = await self._claude.send(user_id, text)
 
         # ── Differentiated error handling with auto-retry ──

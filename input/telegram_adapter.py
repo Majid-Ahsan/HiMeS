@@ -1,5 +1,8 @@
+import asyncio
 import io
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import Callable, Awaitable
 from uuid import uuid4
@@ -27,16 +30,23 @@ _TG_DOC_MAX = 50 * 1024 * 1024     # 50 MB
 _TG_CAPTION_MAX = 1024              # caption character limit
 _DOWNLOAD_TIMEOUT = 15              # seconds
 
+# Temp upload directory for files sent to Claude
+_UPLOAD_DIR = "/tmp/himes/uploads"
+
 # Type for the callback that orchestrator registers
-MessageCallback = Callable[[int, str, list[bytes] | None], Awaitable[str]]
+# attachments = list of temp file paths
+MessageCallback = Callable[[int, str, list[str] | None], Awaitable[str]]
 
 
 class TelegramAdapter:
     def __init__(self, on_message: MessageCallback) -> None:
         self._on_message = on_message
         self._app: Application | None = None
+        self._whisper_model = None  # lazy-loaded, cached
 
     async def start(self) -> None:
+        os.makedirs(_UPLOAD_DIR, exist_ok=True)
+
         self._app = (
             Application.builder()
             .token(settings.telegram.bot_token)
@@ -52,6 +62,9 @@ class TelegramAdapter:
         )
         self._app.add_handler(
             MessageHandler(filters.PHOTO, self._handle_photo)
+        )
+        self._app.add_handler(
+            MessageHandler(filters.Document.ALL, self._handle_document)
         )
         self._app.add_handler(CallbackQueryHandler(self._handle_button_tap))
 
@@ -110,11 +123,16 @@ class TelegramAdapter:
             return
 
         file = await context.bot.get_file(voice.file_id)
-        buf = io.BytesIO()
-        await file.download_to_memory(buf)
-        buf.seek(0)
+        filepath = os.path.join(_UPLOAD_DIR, f"{uuid4().hex}.ogg")
+        await file.download_to_drive(filepath)
 
-        transcript = await self._transcribe_audio(buf)
+        transcript = await self._transcribe_audio(filepath)
+        # Cleanup audio temp file
+        try:
+            os.unlink(filepath)
+        except OSError:
+            pass
+
         if not transcript:
             await update.message.reply_text("Konnte Audio nicht transkribieren.")
             return
@@ -134,13 +152,40 @@ class TelegramAdapter:
 
         photo = update.message.photo[-1]  # highest resolution
         file = await context.bot.get_file(photo.file_id)
-        buf = io.BytesIO()
-        await file.download_to_memory(buf)
-        image_bytes = buf.getvalue()
+        filepath = os.path.join(_UPLOAD_DIR, f"{uuid4().hex}.jpg")
+        await file.download_to_drive(filepath)
 
         caption = update.message.caption or "Beschreibe dieses Bild."
         await self._process_and_reply(
-            update, user_id, caption, images=[image_bytes]
+            update, user_id, caption, attachments=[filepath]
+        )
+
+    async def _handle_document(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        if not update.effective_user or not update.message or not update.message.document:
+            return
+        user_id = update.effective_user.id
+        if not self._is_authorized(user_id):
+            return
+
+        doc = update.message.document
+        logger.info(
+            "telegram.document_received",
+            user_id=user_id,
+            filename=doc.file_name,
+            mime=doc.mime_type,
+            size=doc.file_size,
+        )
+
+        file = await context.bot.get_file(doc.file_id)
+        ext = os.path.splitext(doc.file_name or "file")[1] or ".bin"
+        filepath = os.path.join(_UPLOAD_DIR, f"{uuid4().hex}{ext}")
+        await file.download_to_drive(filepath)
+
+        caption = update.message.caption or f"Analysiere diese Datei: {doc.file_name}"
+        await self._process_and_reply(
+            update, user_id, caption, attachments=[filepath]
         )
 
     async def _handle_button_tap(
@@ -178,11 +223,11 @@ class TelegramAdapter:
         update: Update,
         user_id: int,
         text: str,
-        images: list[bytes] | None = None,
+        attachments: list[str] | None = None,
     ) -> None:
         await update.message.chat.send_action("typing")
         try:
-            response = await self._on_message(user_id, text, images)
+            response = await self._on_message(user_id, text, attachments)
             parsed = parse_response(response)
             await self._send_parsed_response(update.message, parsed)
         except Exception:
@@ -367,17 +412,24 @@ class TelegramAdapter:
             logger.warning("telegram.download_error", url=url)
             return None
 
-    async def _transcribe_audio(self, audio_buf: io.BytesIO) -> str | None:
-        try:
+    def _get_whisper_model(self):
+        """Lazy-load and cache whisper model."""
+        if self._whisper_model is None:
             import whisper
-            import tempfile
+            logger.info("telegram.whisper_loading")
+            self._whisper_model = whisper.load_model("base")
+            logger.info("telegram.whisper_loaded")
+        return self._whisper_model
 
-            with tempfile.NamedTemporaryFile(suffix=".ogg", delete=True) as tmp:
-                tmp.write(audio_buf.read())
-                tmp.flush()
-                model = whisper.load_model("base")
-                result = model.transcribe(tmp.name)
-                return result.get("text", "").strip() or None
+    async def _transcribe_audio(self, filepath: str) -> str | None:
+        try:
+            model = self._get_whisper_model()
+            # Run CPU-bound transcription in thread pool to avoid blocking event loop
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None, model.transcribe, filepath
+            )
+            return result.get("text", "").strip() or None
         except Exception:
             logger.exception("telegram.transcription_failed")
             return None
