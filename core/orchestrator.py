@@ -10,7 +10,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from config.settings import settings
-from core.claude_subprocess import ClaudeSubprocess
+from core.claude_subprocess import ClaudeSubprocess, ClaudeErrorType
 from input.telegram_adapter import TelegramAdapter
 
 logger = structlog.get_logger(__name__)
@@ -64,6 +64,41 @@ class Orchestrator:
         config_path.write_text(rendered, encoding="utf-8")
         logger.info("orchestrator.mcp_config_rendered")
 
+    _ERROR_MESSAGES = {
+        ClaudeErrorType.TIMEOUT: (
+            "Die Anfrage hat zu lange gedauert. "
+            "Ich starte eine neue Session und versuche es nochmal..."
+        ),
+        ClaudeErrorType.API_OVERLOADED: (
+            "Der Server ist gerade überlastet. "
+            "Ich versuche es in ein paar Sekunden nochmal..."
+        ),
+        ClaudeErrorType.MAX_TURNS: (
+            "Die Anfrage war zu komplex. "
+            "Kannst du sie einfacher formulieren?"
+        ),
+        ClaudeErrorType.TOOL_LIMIT: (
+            "Zu viele Tool-Aufrufe bei dieser Anfrage. "
+            "Versuche es mit einer spezifischeren Frage."
+        ),
+        ClaudeErrorType.SESSION_FAILED: (
+            "Es gab ein technisches Problem mit der Session. "
+            "Ich starte eine neue..."
+        ),
+        ClaudeErrorType.SUBPROCESS_CRASH: (
+            "Es gab ein technisches Problem. "
+            "Ich starte eine neue Session..."
+        ),
+    }
+
+    # These error types get an automatic retry with a fresh session
+    _RETRYABLE_ERRORS = {
+        ClaudeErrorType.TIMEOUT,
+        ClaudeErrorType.API_OVERLOADED,
+        ClaudeErrorType.SUBPROCESS_CRASH,
+        ClaudeErrorType.SESSION_FAILED,
+    }
+
     async def _handle_message(
         self, user_id: int, text: str, images: list[bytes] | None = None
     ) -> str:
@@ -76,10 +111,51 @@ class Orchestrator:
 
         response = await self._claude.send(user_id, text)
 
+        # ── Differentiated error handling with auto-retry ──
         if response.errors and not response.text:
+            error_type = response.error_type or ClaudeErrorType.UNKNOWN
             error_summary = "; ".join(response.errors)
-            logger.error("orchestrator.claude_errors", user_id=user_id, errors=error_summary)
-            return f"Fehler bei der Verarbeitung: {error_summary}"
+            logger.error(
+                "orchestrator.claude_errors",
+                user_id=user_id,
+                error_type=error_type,
+                errors=error_summary,
+                session_id=response.session_id,
+                prompt=text[:200],
+            )
+
+            # Auto-retry for transient errors (1x with fresh session)
+            if error_type in self._RETRYABLE_ERRORS:
+                user_msg = self._ERROR_MESSAGES.get(error_type, "")
+                logger.info("orchestrator.auto_retry", user_id=user_id, error_type=error_type)
+
+                # Clear broken session and wait briefly for API overload
+                self._claude.clear_session(user_id)
+                if error_type == ClaudeErrorType.API_OVERLOADED:
+                    await asyncio.sleep(3)
+
+                retry_response = await self._claude.send(user_id, text)
+
+                if retry_response.text:
+                    logger.info("orchestrator.retry_success", user_id=user_id)
+                    return retry_response.text
+
+                # Retry also failed
+                logger.error(
+                    "orchestrator.retry_failed",
+                    user_id=user_id,
+                    errors="; ".join(retry_response.errors),
+                )
+                return (
+                    user_msg
+                    or f"Fehler bei der Verarbeitung: {error_summary}"
+                )
+
+            # Non-retryable errors: return user-friendly message
+            return self._ERROR_MESSAGES.get(
+                error_type,
+                f"Fehler bei der Verarbeitung: {error_summary}",
+            )
 
         if not response.text:
             return "Keine Antwort von Claude erhalten."

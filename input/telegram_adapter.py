@@ -168,7 +168,7 @@ class TelegramAdapter:
         except Exception:
             logger.exception("telegram.button_reply_failed", user_id=user_id)
             await query.message.reply_text(
-                "Fehler bei der Verarbeitung. Bitte erneut versuchen."
+                "Es gab ein Netzwerkproblem. Bitte versuche es nochmal."
             )
 
     # ── Core reply logic ──────────────────────────────────────────────
@@ -188,7 +188,7 @@ class TelegramAdapter:
         except Exception:
             logger.exception("telegram.reply_failed", user_id=user_id)
             await update.message.reply_text(
-                "Fehler bei der Verarbeitung. Bitte erneut versuchen."
+                "Es gab ein Netzwerkproblem. Bitte versuche es nochmal."
             )
 
     async def _send_parsed_response(self, message, parsed: ParsedResponse) -> None:

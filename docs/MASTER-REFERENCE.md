@@ -1,5 +1,5 @@
 # HiMeS — MASTER REFERENCE
-> **Version:** v16 · **Stand:** 2026-04-13 · **Pfad:** `docs/MASTER-REFERENCE.md`
+> **Version:** v17 · **Stand:** 2026-04-14 · **Pfad:** `docs/MASTER-REFERENCE.md`
 > **Nutzung:** `Lies docs/MASTER-REFERENCE.md und fahre fort mit Phase [X.Y]: [Task].`
 > **Nach Task:** Status in dieser Datei updaten + committen.
 
@@ -7,7 +7,7 @@
 
 ## 1. AKTUELLER STATUS — LIES DAS ZUERST
 
-**Phase:** 1.5 Stabilisierung · **6 MCP aktiv** · **VPS läuft** · **GitHub v7 (10 Commits)**
+**Phase:** 1.5 Stabilisierung · **6 MCP aktiv** · **VPS läuft** · **GitHub v9 (12 Commits)**
 
 | # | Task | Status | Nächste Aktion |
 |---|---|---|---|
@@ -25,8 +25,9 @@
 | 1.5.12 | Rich Media Output | ✅ | Deployed+getestet: Notion-Fotos ✅, PDF/Audio/Location Parser bereit (Maps MCP fehlt noch) |
 | 1.5.14 | Notion Query Bugs | ✅ | 5 Bugs: Relation-Filter, DB-Zuordnung, Query-Strategie, Fallback, Parent-Kontext |
 | 1.5.15 | Kalender-Bugs | ✅ | 3 Bugs: Bestätigung nach Erstellung, Apple-Maps-Ort, ORGANIZER für Einladungen |
+| 1.5.16 | Crash-Handling + Begrüßung | ✅ | Differenzierte Fehlermeldungen, Auto-Retry bei transienten Fehlern, kurze Begrüßung |
 
-**Empfohlene Reihenfolge:** ~~1.5.11~~ → ~~1.5.12~~ → ~~1.5.14~~ → ~~1.5.15~~ → 1.5.5 → 1.5.6 → 1.5.7 → 1.5.9 → 1.5.10 → 1.5.2 → 1.5.3 → 1.5.4 → 1.5.8
+**Empfohlene Reihenfolge:** ~~1.5.11~~ → ~~1.5.12~~ → ~~1.5.14~~ → ~~1.5.15~~ → ~~1.5.16~~ → 1.5.5 → 1.5.6 → 1.5.7 → 1.5.9 → 1.5.10 → 1.5.2 → 1.5.3 → 1.5.4 → 1.5.8
 
 ### Bekannte Bugs (Phase 1.5.11)
 
@@ -516,3 +517,4 @@ Regeln: Async, Logging, .env-konfigurierbar.
 | 2026-04-13 | 14 | Phase 1.5.15 ✅: 3 Kalender-Bugs gefixt. CalDAV client.py: EventCreationResult erweitert (location, description, attendees, reminders_count), ORGANIZER-Feld für iMIP-Einladungen (CALDAV_ORGANIZER_EMAIL/NAME aus .env), METHOD:REQUEST im VCALENDAR. CalDAV server.py: location_geo Parameter im Tool-Schema. System Prompt: Anweisung location_geo zu nutzen + Bestätigungsdetails nach Erstellung. |
 | 2026-04-13 | 15 | CalDAV Auto-Geocoding: Nominatim-Integration für automatische Adressauflösung (Ortsname→Straße+PLZ+Stadt+Koordinaten). GEO-Property statt X-APPLE-STRUCTURED-LOCATION (iCloud escaped Komma in geo-URI). LOCATION mit "Name\nAdresse" Format. iPhone zeigt Karte+Pin korrekt. caldav-mcp lokal gespiegelt (/caldav-mcp/). |
 | 2026-04-13 | 16 | Phase 2 Roadmap erweitert: +2.12 Telegram Mini App, +2.13 Intelligent Document Processing (Claude Vision), +2.14 Personal Vault (Google Drive). MCP-Katalog: +CardDAV (dav-mcp), +Google Drive. ADR-015 (3-Layer Memory), ADR-016 (Google Drive statt iCloud). |
+| 2026-04-14 | 17 | Phase 1.5.16 ✅: 2 Bugs gefixt. BUG-1: Differenzierte Fehlermeldungen (Timeout/API-Overload/max_turns/Tool-Limit/Session-Crash je eigene User-Meldung), Auto-Retry bei transienten Fehlern (Timeout, 503/529, Crash → 1x Retry mit neuer Session), ClaudeErrorType-Enum, verbessertes Error-Logging (Stacktrace+Prompt+Session-ID). BUG-2: Begrüßung auf max 1-2 Sätze beschränkt, keine Feature-Listen. |

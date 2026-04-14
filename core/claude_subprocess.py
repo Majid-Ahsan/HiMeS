@@ -13,6 +13,17 @@ from config.settings import settings
 logger = structlog.get_logger(__name__)
 
 
+class ClaudeErrorType:
+    """Error type constants for differentiated error handling."""
+    TIMEOUT = "timeout"
+    MAX_TURNS = "max_turns"
+    TOOL_LIMIT = "tool_limit"
+    API_OVERLOADED = "api_overloaded"
+    SESSION_FAILED = "session_failed"
+    SUBPROCESS_CRASH = "subprocess_crash"
+    UNKNOWN = "unknown"
+
+
 @dataclass
 class ClaudeResponse:
     text: str = ""
@@ -22,11 +33,14 @@ class ClaudeResponse:
     cost_usd: float = 0.0
     duration_ms: float = 0.0
     errors: list[str] = field(default_factory=list)
+    error_type: str = ""
 
 
 SYSTEM_PROMPT = (
     "Du bist Jarvis, der persönliche KI-Assistent von Majid. "
     "Du antwortest auf Deutsch, bist präzise und hilfsbereit. "
+    "Auf Begrüßungen (Hi, Hallo, Moin, etc.) antworte kurz und natürlich — "
+    "maximal 1-2 Sätze, KEINE Feature-Listen, KEINE Aufzählung deiner Fähigkeiten.\n"
     "\n\n"
     "## Sprache\n"
     "WICHTIG: Antworte IMMER auf Deutsch, auch wenn Tool-Ergebnisse (Wetter, Notion, "
@@ -261,6 +275,7 @@ class ClaudeSubprocess:
                                 count=tool_call_count,
                             )
                             process.terminate()
+                            response.error_type = ClaudeErrorType.TOOL_LIMIT
                             response.errors.append(
                                 f"Tool-Call-Limit erreicht ({settings.claude.max_tool_calls})"
                             )
@@ -275,15 +290,25 @@ class ClaudeSubprocess:
                             response.text = result_text
                         # Handle max_turns exhaustion
                         if event.get("subtype") == "error_max_turns" and not result_text:
+                            response.error_type = ClaudeErrorType.MAX_TURNS
                             response.text = (
                                 "Die Anfrage war zu komplex und hat das Turn-Limit erreicht. "
                                 "Bitte versuche es mit einer spezifischeren Frage."
                             )
 
                     case "error":
-                        error_msg = event.get("error", {}).get("message", str(event))
+                        error_obj = event.get("error", {})
+                        error_msg = error_obj.get("message", str(event))
                         response.errors.append(error_msg)
-                        logger.error("claude.error_event", error=error_msg)
+                        # Detect API overload errors
+                        if any(code in error_msg for code in ("529", "503", "overloaded", "rate")):
+                            response.error_type = ClaudeErrorType.API_OVERLOADED
+                        logger.error(
+                            "claude.error_event",
+                            error=error_msg,
+                            user_id=user_id,
+                            session_id=response.session_id,
+                        )
 
             await process.wait()
 
@@ -305,11 +330,19 @@ class ClaudeSubprocess:
                 response.errors.append(f"Exit code {process.returncode}: {stderr}")
 
         except asyncio.TimeoutError:
+            response.error_type = ClaudeErrorType.TIMEOUT
             response.errors.append("Claude subprocess timeout")
-            logger.error("claude.timeout", user_id=user_id)
+            logger.error("claude.timeout", user_id=user_id, session_id=response.session_id)
         except Exception as e:
+            response.error_type = ClaudeErrorType.SUBPROCESS_CRASH
             response.errors.append(str(e))
-            logger.exception("claude.subprocess_error", user_id=user_id)
+            logger.error(
+                "claude.subprocess_error",
+                user_id=user_id,
+                session_id=response.session_id,
+                error=str(e),
+                exc_info=True,
+            )
         finally:
             os.close(master_fd)
 
