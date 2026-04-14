@@ -1,5 +1,5 @@
 # HiMeS — MASTER REFERENCE
-> **Version:** v17 · **Stand:** 2026-04-14 · **Pfad:** `docs/MASTER-REFERENCE.md`
+> **Version:** v18 · **Stand:** 2026-04-14 · **Pfad:** `docs/MASTER-REFERENCE.md`
 > **Nutzung:** `Lies docs/MASTER-REFERENCE.md und fahre fort mit Phase [X.Y]: [Task].`
 > **Nach Task:** Status in dieser Datei updaten + committen.
 
@@ -7,7 +7,7 @@
 
 ## 1. AKTUELLER STATUS — LIES DAS ZUERST
 
-**Phase:** 1.5 Stabilisierung · **6 MCP aktiv** · **VPS läuft** · **GitHub v9 (12 Commits)**
+**Phase:** 1.5 Stabilisierung · **6 MCP aktiv** · **VPS läuft** · **GitHub v10 (13 Commits)**
 
 | # | Task | Status | Nächste Aktion |
 |---|---|---|---|
@@ -26,8 +26,9 @@
 | 1.5.14 | Notion Query Bugs | ✅ | 5 Bugs: Relation-Filter, DB-Zuordnung, Query-Strategie, Fallback, Parent-Kontext |
 | 1.5.15 | Kalender-Bugs | ✅ | 3 Bugs: Bestätigung nach Erstellung, Apple-Maps-Ort, ORGANIZER für Einladungen |
 | 1.5.16 | Crash-Handling + Begrüßung | ✅ | Differenzierte Fehlermeldungen, Auto-Retry bei transienten Fehlern, kurze Begrüßung |
+| 1.5.17 | Kalender Update + Adresse | ✅ | caldav_update_event Tool, Abkürzungen→volle Namen im Prompt, Geocoding für Adressen |
 
-**Empfohlene Reihenfolge:** ~~1.5.11~~ → ~~1.5.12~~ → ~~1.5.14~~ → ~~1.5.15~~ → ~~1.5.16~~ → 1.5.5 → 1.5.6 → 1.5.7 → 1.5.9 → 1.5.10 → 1.5.2 → 1.5.3 → 1.5.4 → 1.5.8
+**Empfohlene Reihenfolge:** ~~1.5.11~~ → ~~1.5.12~~ → ~~1.5.14~~ → ~~1.5.15~~ → ~~1.5.16~~ → ~~1.5.17~~ → 1.5.5 → 1.5.6 → 1.5.7 → 1.5.9 → 1.5.10 → 1.5.2 → 1.5.3 → 1.5.4 → 1.5.8
 
 ### Bekannte Bugs (Phase 1.5.11)
 
@@ -145,7 +146,7 @@ himes/
 |---|---|---|---|
 | HiMeS Tools | stdio Python | memory (2) + notion (12): search, read_page, create_page, update_page, append_content, archive_page, list_children, get_database, query_database, add_entry, update_entry, delete_entry | ✅ |
 | Things 3 | SSE | create_task, list_today, complete_task | ✅ |
-| CalDAV | SSE | create_event (+ location_geo, ORGANIZER), get_events (Start/End), search | ✅ |
+| CalDAV | SSE | create_event, update_event, delete_event, get_events, search (+ Auto-Geocoding, ORGANIZER) | ✅ |
 | Time | stdio Python | current_time, convert_time (Europe/Berlin) | ✅ |
 | Weather | stdio TS | forecast, current_conditions, alerts | ✅ |
 | Deutsche Bahn | stdio Python | db_search_connections, db_departures, db_arrivals, db_find_station, db_nearby_stations, db_trip_details, db_pendler_check + 3 Timetable-API-Tools (optional) | ✅ |
@@ -518,3 +519,4 @@ Regeln: Async, Logging, .env-konfigurierbar.
 | 2026-04-13 | 15 | CalDAV Auto-Geocoding: Nominatim-Integration für automatische Adressauflösung (Ortsname→Straße+PLZ+Stadt+Koordinaten). GEO-Property statt X-APPLE-STRUCTURED-LOCATION (iCloud escaped Komma in geo-URI). LOCATION mit "Name\nAdresse" Format. iPhone zeigt Karte+Pin korrekt. caldav-mcp lokal gespiegelt (/caldav-mcp/). |
 | 2026-04-13 | 16 | Phase 2 Roadmap erweitert: +2.12 Telegram Mini App, +2.13 Intelligent Document Processing (Claude Vision), +2.14 Personal Vault (Google Drive). MCP-Katalog: +CardDAV (dav-mcp), +Google Drive. ADR-015 (3-Layer Memory), ADR-016 (Google Drive statt iCloud). |
 | 2026-04-14 | 17 | Phase 1.5.16 ✅: 2 Bugs gefixt. BUG-1: Differenzierte Fehlermeldungen (Timeout/API-Overload/max_turns/Tool-Limit/Session-Crash je eigene User-Meldung), Auto-Retry bei transienten Fehlern (Timeout, 503/529, Crash → 1x Retry mit neuer Session), ClaudeErrorType-Enum, verbessertes Error-Logging (Stacktrace+Prompt+Session-ID). BUG-2: Begrüßung auf max 1-2 Sätze beschränkt, keine Feature-Listen. |
+| 2026-04-14 | 18 | Phase 1.5.17 ✅: caldav_update_event Tool + Adressauflösung. CalDAV client.py: update_event() (UID-basiert, nur geänderte Felder, SEQUENCE++, Auto-Geocoding bei neuem Ort). CalDAV server.py: caldav_update_event Tool-Schema (uid required, optional: title/description/location/start_time/end_time/reminders/attendees). System Prompt: TERMIN-ÄNDERUNG Regel (erst suchen, dann updaten, nie neu erstellen), Abkürzungen→volle Namen (JoHo→St. Johannes Hospital, MHB→Marienhospital Bottrop, OPS→Otto-Pankok-Schule). |
