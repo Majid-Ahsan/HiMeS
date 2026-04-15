@@ -1,5 +1,5 @@
 # HiMeS — MASTER REFERENCE
-> **Version:** v20 · **Stand:** 2026-04-15 · **Pfad:** `docs/MASTER-REFERENCE.md`
+> **Version:** v22 · **Stand:** 2026-04-16 · **Pfad:** `docs/MASTER-REFERENCE.md`
 > **Nutzung:** `Lies docs/MASTER-REFERENCE.md und fahre fort mit Phase [X.Y]: [Task].`
 > **Nach Task:** Status in dieser Datei updaten + committen.
 
@@ -28,7 +28,7 @@
 | 1.5.16 | Crash-Handling + Begrüßung | ✅ | Differenzierte Fehlermeldungen, Auto-Retry bei transienten Fehlern, kurze Begrüßung |
 | 1.5.17 | Kalender Update + Adresse | ✅ | caldav_update_event Tool, Abkürzungen→volle Namen im Prompt, Geocoding für Adressen |
 | 1.5.18 | Multi-Format I/O | ✅ | Foto/Dokument/Voice Input, Media-Output Prompt-Regel, Whisper-Caching |
-| 1.5.19 | DB + VRR Nahverkehr | ✅ | Self-hosted db-rest, VRR-Produkte (U/Tram/Bus), Gleis-Fix, 1+4 Verbindungen, Telegram-Design, zuginfo.nrw |
+| 1.5.19 | DB + VRR Nahverkehr | ✅ | Self-hosted db-rest, VRR-Produkte (U/Tram/Bus), Gleis-Fix, 1+4 Verbindungen, Telegram-Design, zuginfo.nrw, Adress-Routing |
 
 **Empfohlene Reihenfolge:** ~~1.5.11~~ → ~~1.5.12~~ → ~~1.5.14~~ → ~~1.5.15~~ → ~~1.5.16~~ → ~~1.5.17~~ → ~~1.5.18~~ → 1.5.5 → 1.5.6 → 1.5.7 → 1.5.9 → 1.5.10 → 1.5.2 → 1.5.3 → 1.5.4 → 1.5.8
 
@@ -151,7 +151,7 @@ himes/
 | CalDAV | SSE | create_event, update_event, delete_event, get_events, search (+ Auto-Geocoding, ORGANIZER) | ✅ |
 | Time | stdio Python | current_time, convert_time (Europe/Berlin) | ✅ |
 | Weather | stdio TS | forecast, current_conditions, alerts | ✅ |
-| Deutsche Bahn + VRR | stdio Python | db_search_connections (1+4 Verbindungen, alle Verkehrsmittel), db_departures (Züge+S/U-Bahn+Tram+Bus, Farbemojis), db_arrivals, db_find_station, db_nearby_stations, db_trip_details, db_pendler_check, db_nrw_stoerungen (zuginfo.nrw) + 3 Timetable-API-Tools (optional) | ✅ |
+| Deutsche Bahn + VRR | stdio Python | db_search_connections (1+4 Verbindungen, alle Verkehrsmittel, Adressen+POIs), db_departures (Züge+S/U-Bahn+Tram+Bus, Farbemojis), db_arrivals, db_find_station (inkl. Adressen), db_nearby_stations, db_trip_details, db_pendler_check, db_nrw_stoerungen (zuginfo.nrw) + 3 Timetable-API-Tools (optional) | ✅ |
 
 ### Nächste (KRITISCH → HOCH)
 
@@ -308,7 +308,7 @@ Async throughout · Kein Hardcoding (.env) · Logging (structlog) · Circuit Bre
 | 014 | Notion Native: eigener Python-Client statt easy-notion-mcp (14 Tools, Relation-Auflösung, Schema-Cache, Markdown I/O, keine externe Dependency) | Aktiv |
 | 015 | 3-Layer Memory: Short-term MEMORY.md + Mid-term Cognee Graph + Long-term Rules. Skaliert besser als flaches 2-Dateien-System, semantischer Graph baut Beziehungen auf, Rules ändern sich selten | Geplant |
 | 016 | Google Drive als Dateispeicher statt iCloud-Direktzugriff. iCloud hat keine API, Google Drive MCP existiert, iCloud↔Drive Sync als Brücke | Geplant |
-| 017 | DB self-hosted + VRR: derhuerst/db-rest:6 im Docker-Network (Primary) mit v6.db.transport.rest (Fallback). Alle Produkte explizit aktiviert (subway, tram, bus). Journey-Plattformen via departurePlatform/arrivalPlatform. Telegram-optimiertes Output mit Emojis. zuginfo.nrw für NRW-Störungen | Aktiv |
+| 017 | DB self-hosted + VRR: derhuerst/db-rest:6 im Docker-Network (Primary) mit v6.db.transport.rest (Fallback). Alle Produkte explizit aktiviert (subway, tram, bus). Journey-Plattformen via departurePlatform/arrivalPlatform. Telegram-optimiertes Output mit Emojis. zuginfo.nrw für NRW-Störungen. Adress-Routing: resolve_location() (Stationen+Adressen+POIs), journeys mit from.type=location für Nicht-Stationen | Aktiv |
 
 ---
 
@@ -524,3 +524,6 @@ Regeln: Async, Logging, .env-konfigurierbar.
 | 2026-04-14 | 17 | Phase 1.5.16 ✅: 2 Bugs gefixt. BUG-1: Differenzierte Fehlermeldungen (Timeout/API-Overload/max_turns/Tool-Limit/Session-Crash je eigene User-Meldung), Auto-Retry bei transienten Fehlern (Timeout, 503/529, Crash → 1x Retry mit neuer Session), ClaudeErrorType-Enum, verbessertes Error-Logging (Stacktrace+Prompt+Session-ID). BUG-2: Begrüßung auf max 1-2 Sätze beschränkt, keine Feature-Listen. |
 | 2026-04-14 | 18 | Phase 1.5.17 ✅: caldav_update_event Tool + Adressauflösung. CalDAV client.py: update_event() (UID-basiert, nur geänderte Felder, SEQUENCE++, Auto-Geocoding bei neuem Ort). CalDAV server.py: caldav_update_event Tool-Schema (uid required, optional: title/description/location/start_time/end_time/reminders/attendees). System Prompt: TERMIN-ÄNDERUNG Regel (erst suchen, dann updaten, nie neu erstellen), Abkürzungen→volle Namen (JoHo→St. Johannes Hospital, MHB→Marienhospital Bottrop, OPS→Otto-Pankok-Schule). |
 | 2026-04-14 | 19 | Phase 1.5.18 ✅: Multi-Format I/O. Foto-Input: Temp-Datei in /tmp/himes/uploads/ + Pfad an Claude (Read-Tool liest Bilder). Dokument-Input: Neuer Telegram-Handler für PDF/Word/Excel/etc., gleiche Temp-Datei-Logik. Voice-Input: 3 Fixes — download_to_drive statt download_to_memory, Whisper-Modell gecacht (1x laden), Transkription in Thread-Pool (run_in_executor, blockiert Event Loop nicht mehr). Media-Output: System Prompt Regel — Notion-Bilder IMMER als ![alt](url) ausgeben. orchestrator.py: _process_claude() extrahiert, try/finally für Temp-Cleanup. |
+| 2026-04-15 | 20 | Phase 1.5.19 ✅: DB+VRR Nahverkehr komplett. Self-hosted db-rest:6, alle HAFAS-Produkte (ICE/IC/RE/RB/S/U/Tram/Bus), Gleis-Fix (departurePlatform/arrivalPlatform), 1+4 Verbindungen, Telegram-Design (Emojis, Farbcodes, _german_date), _smart_truncate, zuginfo.nrw Client, _parse_departure (auto-tomorrow), System Prompt DB-Regeln (time-MCP Pflicht). ADR-017. |
+| 2026-04-15 | 21 | DB Adress-Routing: resolve_location() ersetzt resolve_station() in db_search_connections — unterstützt jetzt Straßenadressen und POIs (Schulen, Gebäude) zusätzlich zu Bahnhöfen. rest_client: locations() mit addresses/poi Params, _set_location_params() für HAFAS from.type=location, journeys() akzeptiert str|dict. Fußwege als 🚶 mit Dauer. db_find_station mit include_addresses Option. |
+| 2026-04-16 | 22 | DB Nominatim-Geocoding: HAFAS löste Adressen falsch auf (Otto-Pankok-Schule→Schule Blücherstr., Am Rathaus→Rathausmarkt). Fix: Nominatim-Geocoding (wie CalDAV) in resolve_location() integriert. _looks_like_station() Heuristik: Station-Keywords→HAFAS, Adress-Keywords (Schule/Straße/Hospital/Klinik)→Nominatim, Ziffern→Nominatim. _geocode_nominatim() async via run_in_executor, Mülheim als Default-Stadt-Kontext, _location_cache. _set_location_params() mit from.address statt from.name, keine Fake-IDs an HAFAS. |

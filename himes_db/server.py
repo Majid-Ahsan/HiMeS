@@ -242,7 +242,18 @@ def _format_journey_row(journey: dict, is_earlier: bool = False) -> str:
     train_parts = []
     for leg in legs:
         if leg.get("walking"):
-            train_parts.append("Fussweg")
+            # Show walking duration if available
+            walk_dur = ""
+            w_dep = leg.get("departure")
+            w_arr = leg.get("arrival")
+            if w_dep and w_arr:
+                try:
+                    w_min = int((datetime.fromisoformat(w_arr) - datetime.fromisoformat(w_dep)).total_seconds() / 60)
+                    if w_min > 0:
+                        walk_dur = f" {w_min}min"
+                except (ValueError, TypeError):
+                    pass
+            train_parts.append(f"🚶{walk_dur}")
         else:
             train_parts.append(_get_line_name(leg))
     trains = " ➜ ".join(train_parts)
@@ -393,6 +404,7 @@ def _parse_departure(departure: str | None) -> datetime | None:
 
 @mcp.tool(
     description="Sucht Verbindungen von A nach B (Zug, S-Bahn, U-Bahn, Tram, Bus). "
+    "Unterstuetzt Bahnhoefe, Haltestellen, Adressen und Orte (z.B. 'Am Rathaus 15, 45468 Muelheim' oder 'Otto-Pankok-Schule'). "
     "Zeigt 1 fruehere + 4 spaetere Verbindungen ab der gewuenschten Zeit, "
     "kompakt mit Gleis, Dauer und Verspaetung. "
     "WICHTIG: departure MUSS als volle ISO-DateTime mit Datum uebergeben werden, z.B. '2026-04-16T06:30:00+02:00'. "
@@ -409,8 +421,8 @@ async def db_search_connections(
 ) -> str:
     """Search connections A->B. Shows 1 earlier + 3 later connections around the requested time."""
     try:
-        from_id = await rest_client.resolve_station(from_station)
-        to_id = await rest_client.resolve_station(to_station)
+        from_loc = await rest_client.resolve_location(from_station)
+        to_loc = await rest_client.resolve_location(to_station)
 
         requested_dt: datetime | None = None
         earlier_departure: str | None = None
@@ -427,7 +439,7 @@ async def db_search_connections(
         if earlier_departure and requested_dt:
             # Fetch from 45 min earlier with extra results to find 1 before + 4 after
             data = await rest_client.journeys(
-                from_id, to_id,
+                from_loc, to_loc,
                 departure=earlier_departure,
                 results=10,
                 transfers=transfers,
@@ -452,7 +464,7 @@ async def db_search_connections(
         else:
             # Normal query (no smart split)
             data = await rest_client.journeys(
-                from_id, to_id,
+                from_loc, to_loc,
                 departure=departure,
                 arrival=arrival,
                 results=5,
@@ -465,12 +477,14 @@ async def db_search_connections(
         if not journeys:
             return f"Keine Verbindungen gefunden: {from_station} -> {to_station}"
 
-        # Header
+        # Header — use resolved names for cleaner display
+        from_name = from_loc.get("name", from_station) if isinstance(from_loc, dict) else from_station
+        to_name = to_loc.get("name", to_station) if isinstance(to_loc, dict) else to_station
         req_time_str = requested_dt.astimezone(TZ_BERLIN).strftime("%H:%M") if requested_dt else ""
         first_dt = _get_journey_dep_dt(journeys[0])
         date_str = _german_date(first_dt) if first_dt else ""
 
-        lines: list[str] = [f"🚆 {from_station} → {to_station}"]
+        lines: list[str] = [f"🚆 {from_name} → {to_name}"]
         if date_str:
             lines.append(f"📅 {date_str}")
         lines.append("")
@@ -641,15 +655,19 @@ async def db_arrivals(
 # ── Tool 4: db_find_station ──────────────────────────────────────────
 
 @mcp.tool(
-    description="Sucht Bahnhoefe und Haltestellen nach Name (inkl. U-Bahn, Tram, Bus-Haltestellen)."
+    description="Sucht Bahnhoefe, Haltestellen, Adressen und Orte (inkl. U-Bahn, Tram, Bus-Haltestellen, Strassenadressen, Schulen, POIs)."
 )
 async def db_find_station(
     query: str,
     results: int = 5,
+    include_addresses: bool = False,
 ) -> str:
-    """Search for stations by name (includes local transport stops)."""
+    """Search for stations by name (includes local transport stops). Set include_addresses=True for street addresses and POIs."""
     try:
-        locations = await rest_client.locations(query, results=results)
+        locations = await rest_client.locations(
+            query, results=results,
+            addresses=include_addresses, poi=include_addresses,
+        )
 
         if not locations:
             return f"Keine Stationen gefunden: {query}"
