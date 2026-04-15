@@ -29,7 +29,7 @@ mcp = FastMCP("deutsche-bahn")
 
 # ── Constants ─────────────────────────────────────────────────────────
 
-MUELHEIM_EVA = "8000254"
+MUELHEIM_EVA = "8000259"
 DORTMUND_EVA = "8000080"
 TZ_BERLIN = ZoneInfo("Europe/Berlin")
 
