@@ -2,6 +2,7 @@ import asyncio
 import io
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Callable, Awaitable
@@ -25,6 +26,25 @@ from input.media_parser import parse_response, ParsedResponse, MediaItem, Inline
 logger = structlog.get_logger(__name__)
 
 _TYPING_INTERVAL = 4  # seconds – Telegram expires typing after 5s
+
+# Pre-classification: instant replies for trivial messages (bypass Claude)
+_INSTANT_REPLIES: list[tuple[re.Pattern, str | None]] = [
+    # Greetings → friendly reply
+    (re.compile(
+        r"^\s*(hallo|hi|hey|moin|guten\s*(morgen|tag|abend)|سلام)\s*[!.?]*\s*$",
+        re.IGNORECASE,
+    ), "Hallo Majid! Was kann ich für dich tun?"),
+    # Thanks → short acknowledgement
+    (re.compile(
+        r"^\s*(danke(schön)?|thx|thanks|merci|ممنون|مرسی)\s*[!.?]*\s*$",
+        re.IGNORECASE,
+    ), "Gerne! 😊"),
+    # Confirmations → no reply needed
+    (re.compile(
+        r"^\s*(ok(ay)?|alles\s+klar|verstanden|gut|perfect|👍|👌|✅)\s*[!.?]*\s*$",
+        re.IGNORECASE,
+    ), None),
+]
 
 # Telegram limits
 _TG_PHOTO_MAX = 10 * 1024 * 1024   # 10 MB
@@ -108,6 +128,15 @@ class TelegramAdapter:
             return
 
         logger.info("telegram.text_received", user_id=user_id)
+
+        # Pre-classification: instant reply for trivial messages
+        for pattern, reply in _INSTANT_REPLIES:
+            if pattern.match(update.message.text):
+                logger.info("telegram.instant_reply", user_id=user_id, pattern=pattern.pattern)
+                if reply:
+                    await update.message.reply_text(reply)
+                return
+
         await self._process_and_reply(update, user_id, update.message.text)
 
     async def _handle_voice(
