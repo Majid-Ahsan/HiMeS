@@ -1,5 +1,5 @@
 # HiMeS — MASTER REFERENCE
-> **Version:** v19 · **Stand:** 2026-04-14 · **Pfad:** `docs/MASTER-REFERENCE.md`
+> **Version:** v20 · **Stand:** 2026-04-15 · **Pfad:** `docs/MASTER-REFERENCE.md`
 > **Nutzung:** `Lies docs/MASTER-REFERENCE.md und fahre fort mit Phase [X.Y]: [Task].`
 > **Nach Task:** Status in dieser Datei updaten + committen.
 
@@ -28,6 +28,7 @@
 | 1.5.16 | Crash-Handling + Begrüßung | ✅ | Differenzierte Fehlermeldungen, Auto-Retry bei transienten Fehlern, kurze Begrüßung |
 | 1.5.17 | Kalender Update + Adresse | ✅ | caldav_update_event Tool, Abkürzungen→volle Namen im Prompt, Geocoding für Adressen |
 | 1.5.18 | Multi-Format I/O | ✅ | Foto/Dokument/Voice Input, Media-Output Prompt-Regel, Whisper-Caching |
+| 1.5.19 | DB + VRR Nahverkehr | ✅ | Self-hosted db-rest, VRR-Produkte (U/Tram/Bus), Gleis-Fix, 1+4 Verbindungen, Telegram-Design, zuginfo.nrw |
 
 **Empfohlene Reihenfolge:** ~~1.5.11~~ → ~~1.5.12~~ → ~~1.5.14~~ → ~~1.5.15~~ → ~~1.5.16~~ → ~~1.5.17~~ → ~~1.5.18~~ → 1.5.5 → 1.5.6 → 1.5.7 → 1.5.9 → 1.5.10 → 1.5.2 → 1.5.3 → 1.5.4 → 1.5.8
 
@@ -93,7 +94,7 @@ Telegram → Identity → Mega-Agent (Orchestrator)
 
 ## 3. TECH STACK
 
-Python 3.11 · Claude Code CLI (stream-json Subprocess) · python-telegram-bot · aiohttp · asyncio · Docker + docker-compose · Hetzner VPS · Pydantic BaseSettings · structlog · openai-whisper (lokal)
+Python 3.11 · Claude Code CLI (stream-json Subprocess) · python-telegram-bot · aiohttp · asyncio · Docker + docker-compose (himes + db-rest) · Hetzner VPS · Pydantic BaseSettings · structlog · openai-whisper (lokal) · derhuerst/db-rest:6 (self-hosted HAFAS)
 
 **CLI Flags:**
 ```bash
@@ -128,8 +129,8 @@ himes/
 │   ├── notion_client.py            ← Notion API Client (retry, pagination, cache)
 │   ├── notion_markdown.py          ← Markdown ↔ Notion Blocks Konvertierung
 │   ├── notion_properties.py        ← Property-Konvertierung (Key-Value ↔ Notion API)
-├── himes_db/                       ← Deutsche Bahn MCP (FastMCP, stdio)
-│   ├── server.py · rest_client.py · timetable_client.py
+├── himes_db/                       ← Deutsche Bahn + VRR MCP (FastMCP, stdio)
+│   ├── server.py · rest_client.py · timetable_client.py · zuginfo_client.py
 ├── core/orchestrator.py · claude_subprocess.py
 ├── skills/                         ← Phase 2: Self-evolving Skills
 ├── evals/                          ← Phase 2: Eval System
@@ -150,7 +151,7 @@ himes/
 | CalDAV | SSE | create_event, update_event, delete_event, get_events, search (+ Auto-Geocoding, ORGANIZER) | ✅ |
 | Time | stdio Python | current_time, convert_time (Europe/Berlin) | ✅ |
 | Weather | stdio TS | forecast, current_conditions, alerts | ✅ |
-| Deutsche Bahn | stdio Python | db_search_connections, db_departures, db_arrivals, db_find_station, db_nearby_stations, db_trip_details, db_pendler_check + 3 Timetable-API-Tools (optional) | ✅ |
+| Deutsche Bahn + VRR | stdio Python | db_search_connections (1+4 Verbindungen, alle Verkehrsmittel), db_departures (Züge+S/U-Bahn+Tram+Bus, Farbemojis), db_arrivals, db_find_station, db_nearby_stations, db_trip_details, db_pendler_check, db_nrw_stoerungen (zuginfo.nrw) + 3 Timetable-API-Tools (optional) | ✅ |
 
 ### Nächste (KRITISCH → HOCH)
 
@@ -307,6 +308,7 @@ Async throughout · Kein Hardcoding (.env) · Logging (structlog) · Circuit Bre
 | 014 | Notion Native: eigener Python-Client statt easy-notion-mcp (14 Tools, Relation-Auflösung, Schema-Cache, Markdown I/O, keine externe Dependency) | Aktiv |
 | 015 | 3-Layer Memory: Short-term MEMORY.md + Mid-term Cognee Graph + Long-term Rules. Skaliert besser als flaches 2-Dateien-System, semantischer Graph baut Beziehungen auf, Rules ändern sich selten | Geplant |
 | 016 | Google Drive als Dateispeicher statt iCloud-Direktzugriff. iCloud hat keine API, Google Drive MCP existiert, iCloud↔Drive Sync als Brücke | Geplant |
+| 017 | DB self-hosted + VRR: derhuerst/db-rest:6 im Docker-Network (Primary) mit v6.db.transport.rest (Fallback). Alle Produkte explizit aktiviert (subway, tram, bus). Journey-Plattformen via departurePlatform/arrivalPlatform. Telegram-optimiertes Output mit Emojis. zuginfo.nrw für NRW-Störungen | Aktiv |
 
 ---
 

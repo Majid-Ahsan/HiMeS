@@ -12,6 +12,7 @@ from mcp.server.fastmcp import FastMCP
 
 from himes_db.rest_client import DBRestClient
 from himes_db.timetable_client import DBTimetableClient
+from himes_db.zuginfo_client import ZuginfoClient
 
 log = structlog.get_logger("himes_db")
 
@@ -22,6 +23,7 @@ timetable_client = DBTimetableClient(
     client_id=os.getenv("DB_API_CLIENT_ID", ""),
     client_secret=os.getenv("DB_API_CLIENT_SECRET", ""),
 )
+zuginfo_client = ZuginfoClient()
 
 # ── FastMCP Server ────────────────────────────────────────────────────
 
@@ -87,118 +89,409 @@ def _get_line_name(item: dict) -> str:
     return item.get("name", "?")
 
 
-def _get_platform(item: dict) -> str:
-    """Extract platform info."""
-    return str(item.get("platform", item.get("plannedPlatform", "?")))
+def _get_platform(item: dict, mode: str = "departure") -> str:
+    """Extract platform info. Returns empty string if unavailable.
+
+    Departures/Arrivals use: platform, plannedPlatform
+    Journey legs use: departurePlatform, arrivalPlatform, plannedDeparturePlatform, plannedArrivalPlatform
+    """
+    if mode == "arrival":
+        val = (
+            item.get("arrivalPlatform")
+            or item.get("plannedArrivalPlatform")
+            or item.get("platform")
+            or item.get("plannedPlatform")
+        )
+    else:
+        val = (
+            item.get("departurePlatform")
+            or item.get("plannedDeparturePlatform")
+            or item.get("platform")
+            or item.get("plannedPlatform")
+        )
+    if val is None:
+        # Last resort: try prognosedPlatform (some API versions)
+        val = item.get("prognosedPlatform")
+    if val is None:
+        return ""
+    return str(val)
 
 
 def _get_direction(item: dict) -> str:
     """Extract direction/destination."""
-    return item.get("direction", item.get("destination", {}).get("name", "?"))
+    return item.get("direction") or (item.get("destination") or {}).get("name", "?")
+
+
+def _get_product_type(item: dict) -> str:
+    """Extract short product type label (ICE, IC, RE, RB, S, U, Tram, Bus, etc.)."""
+    line = item.get("line", {})
+    if not line:
+        return ""
+
+    product = line.get("product", "")
+    product_name = line.get("productName", "")
+
+    # productName is more specific (e.g. RE vs RB both have product="regional")
+    # Map known productName values first
+    pn_map = {
+        "ICE": "ICE", "IC": "IC", "EC": "EC",
+        "RE": "RE", "RB": "RB", "NX": "RE",  # NX = National Express = RE
+        "S": "S-Bahn", "U": "U-Bahn",
+        "STR": "Tram", "Bus": "Bus",
+    }
+    if product_name in pn_map:
+        return pn_map[product_name]
+
+    # Fallback to product field
+    product_map = {
+        "nationalExpress": "ICE",
+        "national": "IC",
+        "regionalExpress": "RE",
+        "regional": "Regio",
+        "suburban": "S-Bahn",
+        "subway": "U-Bahn",
+        "tram": "Tram",
+        "bus": "Bus",
+        "ferry": "Faehre",
+        "taxi": "AST",
+    }
+
+    return product_map.get(product, product_name or "")
+
+
+def _smart_truncate(text: str, max_len: int = 150) -> str:
+    """Truncate text at a sentence or word boundary, keeping it readable."""
+    if len(text) <= max_len:
+        return text
+    # Try to cut at sentence end (. ! ?) within limit
+    for sep in [". ", "! ", "? ", "; "]:
+        idx = text.rfind(sep, 0, max_len)
+        if idx > max_len * 0.4:  # At least 40% of max length
+            return text[:idx + 1]
+    # Cut at word boundary
+    idx = text.rfind(" ", 0, max_len)
+    if idx > max_len * 0.5:
+        return text[:idx] + "…"
+    return text[:max_len] + "…"
+
+
+def _get_remarks(item: dict, max_remarks: int = 2) -> list[str]:
+    """Extract relevant remarks/disruption hints from a departure/arrival."""
+    remarks = item.get("remarks", [])
+    result: list[str] = []
+    for r in remarks:
+        rtype = r.get("type", "")
+        text = r.get("text", r.get("summary", ""))
+        # Skip empty, HAFAS internal codes ($IZN etc), and very short
+        if not text or text.startswith("$") or text.startswith('"$') or len(text) < 5:
+            continue
+        # Skip generic status hints, keep disruptions and warnings
+        if rtype in ("status", "hint") and len(text) < 15:
+            continue
+        if rtype in ("warning", "status") or "Ausfall" in text or "Stoerung" in text or "Störung" in text or "Ersatz" in text or "Verspätung" in text or "gesperrt" in text:
+            result.append(_smart_truncate(text))
+        if len(result) >= max_remarks:
+            break
+    return result
+
+
+# ── German day names ─────────────────────────────────────────────────
+
+_DE_DAYS = {0: "Mo", 1: "Di", 2: "Mi", 3: "Do", 4: "Fr", 5: "Sa", 6: "So"}
+
+
+def _german_date(dt: datetime) -> str:
+    """Format datetime to 'Do, 16.04.2026'."""
+    local = dt.astimezone(TZ_BERLIN)
+    return f"{_DE_DAYS[local.weekday()]}, {local.strftime('%d.%m.%Y')}"
+
+
+# ── Journey formatting helper ────────────────────────────────────────
+
+def _format_journey_row(journey: dict, is_earlier: bool = False) -> str:
+    """Format a single journey as a beautiful Telegram-ready row.
+
+    Returns format like:
+      ◽ 06:44 → 07:14  RE1 nach Hamm  ·  30min  ·  Gl. 1→10  ✅
+    """
+    legs = journey.get("legs", [])
+    if not legs:
+        return ""
+
+    first_leg = legs[0]
+    last_leg = legs[-1]
+    dep_time = _format_time(first_leg.get("departure"))
+    arr_time = _format_time(last_leg.get("arrival"))
+
+    # Duration
+    dep_dt = first_leg.get("departure")
+    arr_dt = last_leg.get("arrival")
+    duration = ""
+    if dep_dt and arr_dt:
+        try:
+            d = datetime.fromisoformat(arr_dt) - datetime.fromisoformat(dep_dt)
+            total_min = int(d.total_seconds() / 60)
+            if total_min >= 60:
+                duration = f"{total_min // 60}h{total_min % 60:02d}"
+            else:
+                duration = f"{total_min}min"
+        except (ValueError, TypeError):
+            pass
+
+    # Train names
+    train_parts = []
+    for leg in legs:
+        if leg.get("walking"):
+            train_parts.append("Fussweg")
+        else:
+            train_parts.append(_get_line_name(leg))
+    trains = " ➜ ".join(train_parts)
+
+    # Destination (final leg's direction)
+    final_dest = ""
+    for leg in reversed(legs):
+        if not leg.get("walking"):
+            final_dest = _get_direction(leg)
+            break
+    # Shorten destination: remove "(Westf)", "(Ruhr)" etc. for display
+    import re
+    final_dest = re.sub(r'\s*\([^)]*\)\s*', ' ', final_dest).strip()
+    if len(final_dest) > 22:
+        final_dest = final_dest[:20] + ".."
+
+    # Transfers
+    num_transfers = sum(1 for leg in legs if not leg.get("walking")) - 1
+    transfer_info = ""
+    if num_transfers > 0:
+        transfer_info = f"  ·  {num_transfers}x umst."
+
+    # Platforms
+    dep_gl = _get_platform(first_leg, mode="departure")
+    arr_gl = _get_platform(last_leg, mode="arrival")
+    gl_str = ""
+    if dep_gl and arr_gl:
+        gl_str = f"Gl. {dep_gl}→{arr_gl}"
+    elif dep_gl:
+        gl_str = f"Gl. {dep_gl}"
+
+    # Delay / status
+    delays = []
+    cancelled = False
+    for leg in legs:
+        if leg.get("walking"):
+            continue
+        delay_val = leg.get("departureDelay") or leg.get("delay") or 0
+        if delay_val:
+            delays.append(delay_val)
+        if leg.get("cancelled"):
+            cancelled = True
+
+    if cancelled:
+        status_icon = "❌ AUSFALL"
+    elif delays:
+        max_delay = max(delays)
+        if max_delay >= 60:
+            status_icon = f"⚠️ +{max_delay // 60}min"
+        elif max_delay > 0:
+            status_icon = f"⚠️ +{max_delay}min"
+        else:
+            status_icon = "✅"
+    else:
+        status_icon = "✅"
+
+    # Remarks (first meaningful disruption only)
+    remark_line = ""
+    for leg in legs:
+        for r in leg.get("remarks", []):
+            rtype = r.get("type", "")
+            text = r.get("text", r.get("summary", ""))
+            if not text or text.startswith("$") or text.startswith('"$') or len(text) < 5:
+                continue
+            if rtype in ("warning", "status"):
+                remark_line = f"\n   ⚠️ {_smart_truncate(text)}"
+                break
+        if remark_line:
+            break
+
+    # Build beautiful row
+    marker = "⬅️" if is_earlier else "▶️"
+    line1 = f"{marker} {dep_time} → {arr_time}  {trains} nach {final_dest}"
+    line2_parts = [duration]
+    if gl_str:
+        line2_parts.append(gl_str)
+    line2_parts.append(status_icon)
+    line2 = f"   {' · '.join(line2_parts)}{transfer_info}"
+
+    return line1 + "\n" + line2 + remark_line
+
+
+def _get_journey_dep_dt(journey: dict) -> datetime | None:
+    """Extract departure datetime from a journey for sorting/filtering."""
+    legs = journey.get("legs", [])
+    if not legs:
+        return None
+    dep_str = legs[0].get("departure") or legs[0].get("plannedDeparture")
+    if not dep_str:
+        return None
+    try:
+        return datetime.fromisoformat(dep_str)
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_departure(departure: str | None) -> datetime | None:
+    """Parse departure string to a timezone-aware datetime.
+
+    Handles:
+      - Full ISO: '2026-04-16T06:30:00+02:00'
+      - Date + Time: '2026-04-16 06:30'
+      - Time only: '06:30' (assumes today, or tomorrow if time already passed)
+    """
+    if not departure:
+        return None
+
+    now = datetime.now(TZ_BERLIN)
+
+    # Try full ISO first
+    try:
+        dt = datetime.fromisoformat(departure)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=TZ_BERLIN)
+        return dt
+    except (ValueError, TypeError):
+        pass
+
+    # Try "HH:MM" or "H:MM" format
+    import re
+    time_match = re.match(r'^(\d{1,2}):(\d{2})$', departure.strip())
+    if time_match:
+        h, m = int(time_match.group(1)), int(time_match.group(2))
+        dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        # If the time already passed today, use tomorrow
+        if dt < now:
+            dt += timedelta(days=1)
+        return dt
+
+    # Try "YYYY-MM-DD HH:MM" format
+    dt_match = re.match(r'^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}):(\d{2})$', departure.strip())
+    if dt_match:
+        try:
+            date_part = datetime.strptime(dt_match.group(1), "%Y-%m-%d")
+            dt = date_part.replace(
+                hour=int(dt_match.group(2)),
+                minute=int(dt_match.group(3)),
+                tzinfo=TZ_BERLIN,
+            )
+            return dt
+        except ValueError:
+            pass
+
+    return None
 
 
 # ── Tool 1: db_search_connections ─────────────────────────────────────
 
 @mcp.tool(
-    description="Sucht Zugverbindungen von A nach B. Zeigt Abfahrt, Ankunft, Dauer, Umstiege, Gleis und Verspaetung."
+    description="Sucht Verbindungen von A nach B (Zug, S-Bahn, U-Bahn, Tram, Bus). "
+    "Zeigt 1 fruehere + 4 spaetere Verbindungen ab der gewuenschten Zeit, "
+    "kompakt mit Gleis, Dauer und Verspaetung. "
+    "WICHTIG: departure MUSS als volle ISO-DateTime mit Datum uebergeben werden, z.B. '2026-04-16T06:30:00+02:00'. "
+    "Bei 'morgen'/'uebermorgen' IMMER zuerst mit dem time-MCP die aktuelle Zeit holen und Datum korrekt berechnen!"
 )
 async def db_search_connections(
     from_station: str,
     to_station: str,
     departure: str | None = None,
     arrival: str | None = None,
-    results: int = 3,
+    results: int = 4,
     transfers: int | None = None,
     regional_only: bool = False,
 ) -> str:
-    """Search train connections from A to B."""
+    """Search connections A->B. Shows 1 earlier + 3 later connections around the requested time."""
     try:
         from_id = await rest_client.resolve_station(from_station)
         to_id = await rest_client.resolve_station(to_station)
 
-        data = await rest_client.journeys(
-            from_id, to_id,
-            departure=departure,
-            arrival=arrival,
-            results=results,
-            transfers=transfers,
-            regional_only=regional_only,
-        )
+        requested_dt: datetime | None = None
+        earlier_departure: str | None = None
 
-        journeys = data.get("journeys", [])
+        # Parse the requested departure time and calculate 45min earlier
+        if departure and not arrival:
+            requested_dt = _parse_departure(departure)
+            if requested_dt:
+                earlier_dt = requested_dt - timedelta(minutes=45)
+                earlier_departure = earlier_dt.isoformat()
+                # Also update departure to proper ISO for the API
+                departure = requested_dt.isoformat()
+
+        if earlier_departure and requested_dt:
+            # Fetch from 45 min earlier with extra results to find 1 before + 4 after
+            data = await rest_client.journeys(
+                from_id, to_id,
+                departure=earlier_departure,
+                results=10,
+                transfers=transfers,
+                regional_only=regional_only,
+            )
+            all_journeys = data.get("journeys", [])
+
+            # Split into before/after requested time
+            before: list[dict] = []
+            after: list[dict] = []
+            for j in all_journeys:
+                jdt = _get_journey_dep_dt(j)
+                if jdt and jdt < requested_dt:
+                    before.append(j)
+                else:
+                    after.append(j)
+
+            # Take last 1 before + first 4 after
+            selected_before = before[-1:] if before else []
+            selected_after = after[:4]
+            journeys = selected_before + selected_after
+        else:
+            # Normal query (no smart split)
+            data = await rest_client.journeys(
+                from_id, to_id,
+                departure=departure,
+                arrival=arrival,
+                results=5,
+                transfers=transfers,
+                regional_only=regional_only,
+            )
+            journeys = data.get("journeys", [])[:5]
+            requested_dt = None  # No split marker
+
         if not journeys:
             return f"Keine Verbindungen gefunden: {from_station} -> {to_station}"
 
-        lines: list[str] = [f"Verbindung: {from_station} -> {to_station}\n"]
+        # Header
+        req_time_str = requested_dt.astimezone(TZ_BERLIN).strftime("%H:%M") if requested_dt else ""
+        first_dt = _get_journey_dep_dt(journeys[0])
+        date_str = _german_date(first_dt) if first_dt else ""
 
-        for i, journey in enumerate(journeys[:results], 1):
-            legs = journey.get("legs", [])
-            if not legs:
-                continue
+        lines: list[str] = [f"🚆 {from_station} → {to_station}"]
+        if date_str:
+            lines.append(f"📅 {date_str}")
+        lines.append("")
 
-            first_leg = legs[0]
-            last_leg = legs[-1]
-            dep_time = _format_time(first_leg.get("departure"))
-            arr_time = _format_time(last_leg.get("arrival"))
+        # Format each journey
+        separator_shown = False
+        for journey in journeys:
+            jdt = _get_journey_dep_dt(journey)
+            is_earlier = bool(requested_dt and jdt and jdt < requested_dt)
 
-            # Duration
-            dep_dt = first_leg.get("departure")
-            arr_dt = last_leg.get("arrival")
-            duration = ""
-            if dep_dt and arr_dt:
-                try:
-                    d = datetime.fromisoformat(arr_dt) - datetime.fromisoformat(dep_dt)
-                    total_min = int(d.total_seconds() / 60)
-                    if total_min >= 60:
-                        duration = f"{total_min // 60}h {total_min % 60}min"
-                    else:
-                        duration = f"{total_min} min"
-                except (ValueError, TypeError):
-                    pass
+            # Show separator between before/after
+            if requested_dt and not separator_shown and jdt and jdt >= requested_dt:
+                if any(not line.startswith("🚆") and not line.startswith("📅") and line.strip() for line in lines):
+                    lines.append(f"━━━ ab {req_time_str} ━━━━━━━━━━")
+                separator_shown = True
 
-            num_transfers = len(legs) - 1
-            transfer_str = "direkt" if num_transfers == 0 else f"{num_transfers} Umstieg{'e' if num_transfers > 1 else ''}"
+            row = _format_journey_row(journey, is_earlier=is_earlier)
+            lines.append(row)
+            lines.append("")  # spacing between journeys
 
-            # Train names
-            train_names = []
-            for leg in legs:
-                if leg.get("walking"):
-                    train_names.append("Fussweg")
-                else:
-                    train_names.append(_get_line_name(leg))
-
-            trains = " -> ".join(train_names)
-            lines.append(f"{i}. {trains} ({dep_time} -> {arr_time}, {duration}, {transfer_str})")
-
-            # Platform + delay per leg
-            leg_details = []
-            for leg in legs:
-                if leg.get("walking"):
-                    continue
-                dep_platform = _get_platform(leg)
-                delay = _get_delay_info(leg, "plannedDeparture", "departure")
-                leg_details.append(f"Gl. {dep_platform}")
-                if delay and delay != "puenktlich":
-                    leg_details.append(delay)
-
-            arr_platform = _get_platform(last_leg)
-            arr_delay = _get_delay_info(last_leg, "plannedArrival", "arrival")
-
-            detail = f"   {' -> '.join(leg_details)} -> Gl. {arr_platform}"
-            if arr_delay:
-                detail += f" | {arr_delay}"
-            lines.append(detail)
-
-            # Remarks (disruptions)
-            remarks = journey.get("remarks", [])
-            for remark in remarks[:2]:
-                remark_text = remark.get("text", "")
-                if remark_text:
-                    lines.append(f"   Hinweis: {remark_text[:100]}")
-
-            lines.append("")
-
-        return "\n".join(lines)
+        return "\n".join(lines).rstrip()
 
     except Exception as e:
         log.exception("tool.search_connections_error")
@@ -208,22 +501,31 @@ async def db_search_connections(
 # ── Tool 2: db_departures ────────────────────────────────────────────
 
 @mcp.tool(
-    description="Zeigt die Abfahrtstafel einer Station mit Zuegen, Gleisen und Verspaetungen."
+    description="Zeigt die Abfahrtstafel einer Station — Zuege, S-Bahn, U-Bahn, Tram, Bus mit Gleisen, Verspaetungen und Stoerungen."
 )
 async def db_departures(
     station: str,
     duration: int = 60,
-    results: int = 10,
+    results: int = 15,
+    only_trains: bool = False,
 ) -> str:
-    """Show departures at a station."""
+    """Show departures at a station (all transport types: ICE/IC/RE/RB/S-Bahn/U-Bahn/Tram/Bus)."""
     try:
+        import re as _re
         station_id = await rest_client.resolve_station(station)
-        deps = await rest_client.departures(station_id, duration=duration, results=results)
+        deps = await rest_client.departures(
+            station_id, duration=duration, results=results,
+            include_local=not only_trains,
+        )
 
         if not deps:
             return f"Keine Abfahrten gefunden: {station}"
 
-        lines: list[str] = [f"Abfahrten {station} (naechste {duration} min)\n"]
+        lines: list[str] = [
+            f"🚉 Abfahrten {station}",
+            f"⏱ Nächste {duration} Minuten",
+            "",
+        ]
 
         for dep in deps[:results]:
             dep_time = _format_time(dep.get("when") or dep.get("plannedWhen"))
@@ -231,10 +533,36 @@ async def db_departures(
             direction = _get_direction(dep)
             platform = _get_platform(dep)
             delay = _get_delay_info(dep)
+            product = _get_product_type(dep)
+            cancelled = dep.get("cancelled", False)
+
+            # Shorten direction
+            direction = _re.sub(r'\s*\([^)]*\)\s*', ' ', direction).strip()
+            direction = _re.sub(r',\s+\S+$', '', direction)
+            if len(direction) > 22:
+                direction = direction[:20] + ".."
+
+            # Status icon
+            if cancelled:
+                status = "❌"
+            elif delay == "puenktlich":
+                status = "✅"
+            else:
+                status = f"⚠️{delay}"
+
+            # Product emoji
+            product_emoji = {"S-Bahn": "🔵", "U-Bahn": "🟢", "Tram": "🟡", "Bus": "🚌", "RE": "🔴", "RB": "🔴", "ICE": "⚡", "IC": "⚡", "EC": "⚡"}.get(product, "🔷")
+
+            gl_str = f"Gl.{platform}" if platform else ""
 
             lines.append(
-                f"{dep_time}  {line_name:<8} -> {direction:<25} Gl. {platform:<4} {delay}"
+                f"{product_emoji} {dep_time}  {line_name:<7} → {direction:<20} {gl_str:<5} {status}"
             )
+
+            # Show disruption remarks
+            remarks = _get_remarks(dep, max_remarks=1)
+            for remark in remarks:
+                lines.append(f"   ⚠️ {remark}")
 
         return "\n".join(lines)
 
@@ -246,33 +574,62 @@ async def db_departures(
 # ── Tool 3: db_arrivals ──────────────────────────────────────────────
 
 @mcp.tool(
-    description="Zeigt die Ankunftstafel einer Station."
+    description="Zeigt die Ankunftstafel einer Station — alle Verkehrsmittel inkl. Nahverkehr."
 )
 async def db_arrivals(
     station: str,
     duration: int = 60,
-    results: int = 10,
+    results: int = 15,
+    only_trains: bool = False,
 ) -> str:
-    """Show arrivals at a station."""
+    """Show arrivals at a station (all transport types)."""
     try:
         station_id = await rest_client.resolve_station(station)
-        arrs = await rest_client.arrivals(station_id, duration=duration, results=results)
+        arrs = await rest_client.arrivals(
+            station_id, duration=duration, results=results,
+            include_local=not only_trains,
+        )
 
         if not arrs:
             return f"Keine Ankuenfte gefunden: {station}"
 
-        lines: list[str] = [f"Ankuenfte {station} (naechste {duration} min)\n"]
+        import re as _re
+        lines: list[str] = [
+            f"🚉 Ankuenfte {station}",
+            f"⏱ Nächste {duration} Minuten",
+            "",
+        ]
 
         for arr in arrs[:results]:
             arr_time = _format_time(arr.get("when") or arr.get("plannedWhen"))
             line_name = _get_line_name(arr)
-            origin = arr.get("provenance", arr.get("origin", {}).get("name", "?"))
+            origin = arr.get("provenance") or (arr.get("origin") or {}).get("name", "?")
             platform = _get_platform(arr)
             delay = _get_delay_info(arr)
+            product = _get_product_type(arr)
+            cancelled = arr.get("cancelled", False)
+
+            origin = _re.sub(r'\s*\([^)]*\)\s*', ' ', origin).strip()
+            if len(origin) > 22:
+                origin = origin[:20] + ".."
+
+            if cancelled:
+                status = "❌"
+            elif delay == "puenktlich":
+                status = "✅"
+            else:
+                status = f"⚠️{delay}"
+
+            product_emoji = {"S-Bahn": "🔵", "U-Bahn": "🟢", "Tram": "🟡", "Bus": "🚌", "RE": "🔴", "RB": "🔴", "ICE": "⚡", "IC": "⚡"}.get(product, "🔷")
+            gl_str = f"Gl.{platform}" if platform else ""
 
             lines.append(
-                f"{arr_time}  {line_name:<8} aus {origin:<25} Gl. {platform:<4} {delay}"
+                f"{product_emoji} {arr_time}  {line_name:<7} aus {origin:<20} {gl_str:<5} {status}"
             )
+
+            remarks = _get_remarks(arr, max_remarks=1)
+            for remark in remarks:
+                lines.append(f"   ⚠️ {remark}")
 
         return "\n".join(lines)
 
@@ -284,13 +641,13 @@ async def db_arrivals(
 # ── Tool 4: db_find_station ──────────────────────────────────────────
 
 @mcp.tool(
-    description="Sucht Bahnhoefe und Haltestellen nach Name."
+    description="Sucht Bahnhoefe und Haltestellen nach Name (inkl. U-Bahn, Tram, Bus-Haltestellen)."
 )
 async def db_find_station(
     query: str,
     results: int = 5,
 ) -> str:
-    """Search for stations by name."""
+    """Search for stations by name (includes local transport stops)."""
     try:
         locations = await rest_client.locations(query, results=results)
 
@@ -407,79 +764,130 @@ async def db_trip_details(
 # ── Tool 7: db_pendler_check ─────────────────────────────────────────
 
 @mcp.tool(
-    description="Schnellcheck fuer Majids Pendlerstrecke Muelheim Hbf <-> Dortmund Hbf."
+    description="Schnellcheck fuer Majids Pendlerstrecke Muelheim Hbf <-> Dortmund Hbf. "
+    "Zeigt 1 fruehere + 3 spaetere Verbindungen. "
+    "departure als volle ISO-DateTime, z.B. '2026-04-16T06:30:00+02:00'. Bei 'morgen' Datum von morgen berechnen!"
 )
 async def db_pendler_check(
     direction: str = "hin",
     departure: str | None = None,
 ) -> str:
-    """Quick check for the commute Muelheim <-> Dortmund."""
+    """Quick check for the commute Muelheim <-> Dortmund (1 earlier + 3 later)."""
     try:
         if direction.lower() in ("hin", "hinfahrt", "muelheim", "arbeit"):
-            from_name = "Muelheim (Ruhr) Hbf"
+            from_name = "Muelheim Hbf"
             to_name = "Dortmund Hbf"
             from_id = MUELHEIM_EVA
             to_id = DORTMUND_EVA
         else:
             from_name = "Dortmund Hbf"
-            to_name = "Muelheim (Ruhr) Hbf"
+            to_name = "Muelheim Hbf"
             from_id = DORTMUND_EVA
             to_id = MUELHEIM_EVA
 
-        data = await rest_client.journeys(
-            from_id, to_id,
-            departure=departure,
-            results=3,
-        )
+        requested_dt: datetime | None = None
 
-        journeys = data.get("journeys", [])
+        if departure:
+            requested_dt = _parse_departure(departure)
+            if requested_dt:
+                earlier_dt = requested_dt - timedelta(minutes=45)
+                earlier_departure = earlier_dt.isoformat()
+            else:
+                earlier_departure = departure
+        else:
+            earlier_departure = departure
+
+        if requested_dt:
+            data = await rest_client.journeys(from_id, to_id, departure=earlier_departure, results=10)
+            all_journeys = data.get("journeys", [])
+            before = [j for j in all_journeys if (_get_journey_dep_dt(j) or requested_dt) < requested_dt]
+            after = [j for j in all_journeys if (_get_journey_dep_dt(j) or requested_dt) >= requested_dt]
+            journeys = before[-1:] + after[:4]
+        else:
+            data = await rest_client.journeys(from_id, to_id, departure=departure, results=5)
+            journeys = data.get("journeys", [])[:5]
+
         if not journeys:
             return f"Keine Verbindungen: {from_name} -> {to_name}"
 
-        lines: list[str] = [f"Pendler-Check: {from_name} -> {to_name}\n"]
+        # Header
+        first_dt = _get_journey_dep_dt(journeys[0])
+        date_str = _german_date(first_dt) if first_dt else ""
 
-        for i, journey in enumerate(journeys[:3], 1):
-            legs = journey.get("legs", [])
-            if not legs:
-                continue
+        lines: list[str] = [f"🚆 {from_name} → {to_name}"]
+        if date_str:
+            lines.append(f"📅 {date_str}")
+        lines.append("")
 
-            first_leg = legs[0]
-            last_leg = legs[-1]
-            dep_time = _format_time(first_leg.get("departure"))
-            arr_time = _format_time(last_leg.get("arrival"))
+        req_time_str = requested_dt.astimezone(TZ_BERLIN).strftime("%H:%M") if requested_dt else ""
+        separator_shown = False
 
-            dep_dt = first_leg.get("departure")
-            arr_dt = last_leg.get("arrival")
-            duration = ""
-            if dep_dt and arr_dt:
-                try:
-                    d = datetime.fromisoformat(arr_dt) - datetime.fromisoformat(dep_dt)
-                    duration = f"{int(d.total_seconds() / 60)} min"
-                except (ValueError, TypeError):
-                    pass
+        for journey in journeys:
+            jdt = _get_journey_dep_dt(journey)
+            is_earlier = bool(requested_dt and jdt and jdt < requested_dt)
 
-            num_transfers = len(legs) - 1
-            transfer_str = "direkt" if num_transfers == 0 else f"{num_transfers}x umst."
+            if requested_dt and not separator_shown and jdt and jdt >= requested_dt:
+                if any(not line.startswith("🚆") and not line.startswith("📅") and line.strip() for line in lines):
+                    lines.append(f"━━━ ab {req_time_str} ━━━━━━━━━━")
+                separator_shown = True
 
-            trains = " -> ".join(
-                _get_line_name(leg) for leg in legs if not leg.get("walking")
-            )
-            dep_platform = _get_platform(first_leg)
-            delay = _get_delay_info(first_leg, "plannedDeparture", "departure")
+            lines.append(_format_journey_row(journey, is_earlier=is_earlier))
+            lines.append("")
 
-            lines.append(
-                f"{i}. {trains} ({dep_time} -> {arr_time}, {duration}, {transfer_str}) "
-                f"Gl. {dep_platform} | {delay}"
-            )
-
-        return "\n".join(lines)
+        return "\n".join(lines).rstrip()
 
     except Exception as e:
         log.exception("tool.pendler_check_error")
         return f"Fehler beim Pendler-Check: {e}"
 
 
-# ── Tool 8: db_disruptions (Timetable API) ───────────────────────────
+# ── Tool 8: db_nrw_stoerungen (zuginfo.nrw) ──────────────────────────
+
+@mcp.tool(
+    description="Zeigt aktuelle Stoerungen, Ausfaelle und Bauarbeiten im NRW-Nahverkehr (S-Bahn, RE, RB, U-Bahn, Tram). Daten von zuginfo.nrw."
+)
+async def db_nrw_stoerungen(
+    linie: str | None = None,
+) -> str:
+    """Show current NRW rail/transit disruptions from zuginfo.nrw."""
+    try:
+        disruptions = await zuginfo_client.get_disruptions(line_filter=linie)
+
+        if not disruptions:
+            filter_hint = f" fuer {linie}" if linie else ""
+            return f"Keine aktuellen Stoerungen in NRW{filter_hint} gefunden. (Daten von zuginfo.nrw)"
+
+        header = f"NRW Stoerungen"
+        if linie:
+            header += f" (Filter: {linie})"
+        lines: list[str] = [f"{header} — {len(disruptions)} Meldungen:\n"]
+
+        for d in disruptions[:15]:
+            line_name = d.get("line", "")
+            title = d.get("title", "")
+            desc = d.get("description", "")
+            period = d.get("period", "")
+            dtype = d.get("type", "")
+
+            entry = f"- [{line_name}]" if line_name else "-"
+            if title:
+                entry += f" {title}"
+            if period:
+                entry += f" ({period})"
+            lines.append(entry)
+
+            if desc and desc != title:
+                lines.append(f"  {desc[:200]}")
+
+        lines.append("\nQuelle: zuginfo.nrw")
+        return "\n".join(lines)
+
+    except Exception as e:
+        log.exception("tool.nrw_stoerungen_error")
+        return f"Fehler bei NRW-Stoerungen: {e}"
+
+
+# ── Tool 9: db_disruptions (Timetable API — needs API keys) ──────────
 
 if timetable_client.is_available:
 
