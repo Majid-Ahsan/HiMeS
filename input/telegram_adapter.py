@@ -24,6 +24,8 @@ from input.media_parser import parse_response, ParsedResponse, MediaItem, Inline
 
 logger = structlog.get_logger(__name__)
 
+_TYPING_INTERVAL = 4  # seconds – Telegram expires typing after 5s
+
 # Telegram limits
 _TG_PHOTO_MAX = 10 * 1024 * 1024   # 10 MB
 _TG_DOC_MAX = 50 * 1024 * 1024     # 50 MB
@@ -205,7 +207,10 @@ class TelegramAdapter:
         logger.info("telegram.button_tap", user_id=user_id, data=button_text)
 
         # Send the button label as a new user message to the orchestrator
-        await query.message.chat.send_action("typing")
+        stop_typing = asyncio.Event()
+        typing_task = asyncio.create_task(
+            self._send_typing_until_done(query.message.chat, stop_typing)
+        )
         try:
             response = await self._on_message(user_id, button_text, None)
             parsed = parse_response(response)
@@ -215,6 +220,24 @@ class TelegramAdapter:
             await query.message.reply_text(
                 "Es gab ein Netzwerkproblem. Bitte versuche es nochmal."
             )
+        finally:
+            stop_typing.set()
+            await typing_task
+
+    # ── Typing indicator ───────────────────────────────────────────────
+
+    @staticmethod
+    async def _send_typing_until_done(chat, stop_event: asyncio.Event) -> None:
+        """Send 'typing' action every _TYPING_INTERVAL seconds until stop_event is set."""
+        try:
+            while not stop_event.is_set():
+                await chat.send_action("typing")
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=_TYPING_INTERVAL)
+                except asyncio.TimeoutError:
+                    pass  # not done yet — loop and resend
+        except Exception:
+            logger.debug("telegram.typing_indicator_stopped")
 
     # ── Core reply logic ──────────────────────────────────────────────
 
@@ -225,7 +248,10 @@ class TelegramAdapter:
         text: str,
         attachments: list[str] | None = None,
     ) -> None:
-        await update.message.chat.send_action("typing")
+        stop_typing = asyncio.Event()
+        typing_task = asyncio.create_task(
+            self._send_typing_until_done(update.message.chat, stop_typing)
+        )
         try:
             response = await self._on_message(user_id, text, attachments)
             parsed = parse_response(response)
@@ -235,6 +261,9 @@ class TelegramAdapter:
             await update.message.reply_text(
                 "Es gab ein Netzwerkproblem. Bitte versuche es nochmal."
             )
+        finally:
+            stop_typing.set()
+            await typing_task
 
     async def _send_parsed_response(self, message, parsed: ParsedResponse) -> None:
         """Send text + media + buttons from a parsed response."""

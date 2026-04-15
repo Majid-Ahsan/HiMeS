@@ -21,7 +21,7 @@
 | 1.5.7 | System Prompt extern | 🔶 | In prompts/system.md auslagern (Prompt selbst ✅, dynamisches Datum ✅) |
 | 1.5.8 | Health Monitoring | ⬜ | Self-Check + Telegram Alert |
 | 1.5.9 | Brave Search MCP | ⬜ | mcp_config.json + BRAVE_API_KEY |
-| 1.5.10 | Latenz-Optimierung | ⬜ | Persistenter CLI-Prozess + Typing-Indikator |
+| 1.5.10 | Latenz-Optimierung | 🔶 | Typing-Indikator ✅ (4s-Loop), Persistenter CLI-Prozess ⬜ |
 | 1.5.12 | Rich Media Output | ✅ | Deployed+getestet: Notion-Fotos ✅, PDF/Audio/Location Parser bereit (Maps MCP fehlt noch) |
 | 1.5.14 | Notion Query Bugs | ✅ | 5 Bugs: Relation-Filter, DB-Zuordnung, Query-Strategie, Fallback, Parent-Kontext |
 | 1.5.15 | Kalender-Bugs | ✅ | 3 Bugs: Bestätigung nach Erstellung, Apple-Maps-Ort, ORGANIZER für Einladungen |
