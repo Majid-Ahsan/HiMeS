@@ -11,6 +11,7 @@ from fastapi import FastAPI
 
 from config.settings import settings
 from core.claude_subprocess import ClaudeSubprocess, ClaudeErrorType
+from core.hallucination_guard import build_default_guard
 from input.telegram_adapter import TelegramAdapter
 
 logger = structlog.get_logger(__name__)
@@ -36,6 +37,7 @@ class Orchestrator:
         self._telegram = TelegramAdapter(on_message=self._handle_message)
         self._health_app = self._build_health_app()
         self._shutdown_event = asyncio.Event()
+        self._guard = build_default_guard()
 
     def _build_health_app(self) -> FastAPI:
         app = FastAPI(docs_url=None, redoc_url=None)
@@ -89,6 +91,10 @@ class Orchestrator:
             "Es gab ein technisches Problem. "
             "Ich starte eine neue Session..."
         ),
+        ClaudeErrorType.MCP_FAILED: (
+            "Ein Tool-Server konnte nicht gestartet werden. "
+            "Ich versuche es mit einer neuen Session..."
+        ),
     }
 
     # These error types get an automatic retry with a fresh session
@@ -97,6 +103,7 @@ class Orchestrator:
         ClaudeErrorType.API_OVERLOADED,
         ClaudeErrorType.SUBPROCESS_CRASH,
         ClaudeErrorType.SESSION_FAILED,
+        ClaudeErrorType.MCP_FAILED,
     }
 
     async def _handle_message(
@@ -183,14 +190,41 @@ class Orchestrator:
         if not response.text:
             return "Keine Antwort von Claude erhalten."
 
+        # Hallucination guard — soft check: append disclaimer if output claims
+        # domain-specific data (train numbers, Gleise, delays) but no tool from
+        # that domain was called in this turn. Never rewrites/blocks, only logs.
+        final_text = response.text
+        try:
+            is_suspect, disclaimer = self._guard.check(
+                response.text, response.tools_used
+            )
+            if is_suspect:
+                final_text = response.text + disclaimer
+                logger.warning(
+                    "orchestrator.hallucination_guard_triggered",
+                    user_id=user_id,
+                    tools_used=response.tools_used,
+                    text_len=len(response.text),
+                )
+        except Exception as guard_err:
+            # Guard must NEVER break the response — log and pass through
+            logger.error(
+                "orchestrator.guard_crashed",
+                user_id=user_id,
+                error=str(guard_err),
+                exc_info=True,
+            )
+            final_text = response.text
+
         logger.info(
             "orchestrator.response_sent",
             user_id=user_id,
-            text_len=len(response.text),
+            text_len=len(final_text),
             cost_usd=response.cost_usd,
             turns=response.turns,
+            tools_used=response.tools_used,
         )
-        return response.text
+        return final_text
 
     async def _run_health_server(self) -> None:
         config = uvicorn.Config(

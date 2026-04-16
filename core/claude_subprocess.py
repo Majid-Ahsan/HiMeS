@@ -21,6 +21,7 @@ class ClaudeErrorType:
     API_OVERLOADED = "api_overloaded"
     SESSION_FAILED = "session_failed"
     SUBPROCESS_CRASH = "subprocess_crash"
+    MCP_FAILED = "mcp_failed"
     UNKNOWN = "unknown"
 
 
@@ -34,6 +35,8 @@ class ClaudeResponse:
     duration_ms: float = 0.0
     errors: list[str] = field(default_factory=list)
     error_type: str = ""
+    tools_used: list[str] = field(default_factory=list)  # tool names called in this turn
+    failed_mcps: list[str] = field(default_factory=list)  # MCP servers that failed on startup
 
 
 SYSTEM_PROMPT = (
@@ -71,7 +74,25 @@ SYSTEM_PROMPT = (
     "- Die Emojis und Formatierung sind bereits Telegram-optimiert.\n"
     "- Fuege optional 1-2 Saetze Empfehlung UNTER der Ausgabe hinzu.\n"
     "- KEINE langen Umschreibungen oder Wiederholungen der Daten.\n"
-    "- Die ━━━ Linie trennt 1 frueheren Zug (⬅️) von den Zuegen ab der gewuenschten Zeit (▶️).\n"
+    "- Die ━━━ Linie trennt fruehere Zuege (als 'fruehere Alternativen' markiert) "
+    "von den Zuegen ab der gewuenschten Zeit.\n"
+    "\n"
+    "HALLUZINATIONS-VERBOT (SICHERHEITSKRITISCH):\n"
+    "- Wenn ein DB-Tool nicht verfuegbar ist oder einen Fehler zurueckgibt: "
+    "NIEMALS konkrete Zugdaten erfinden. KEINE Zeiten, KEINE Gleise, "
+    "KEINE Verspaetungen, KEINE Zugnummern, KEINE Stoerungsbeschreibungen.\n"
+    "- Daten aus frueheren Chat-Turns DUERFEN NICHT als aktuell wiederholt werden. "
+    "Jede Zeit-/Gleis-/Verspaetungs-Angabe MUSS aus einem frischen Tool-Call "
+    "IN DIESEM TURN kommen.\n"
+    "- Bei Tool-Fehlern oder leeren Ergebnissen: Uebernimm den Fehlertext ('user_message_hint') "
+    "aus der Tool-Antwort wortwoertlich und schlage Alternativen vor "
+    "(DB Navigator App, bahn.de, VRR-App).\n"
+    "- LIVE-STATUS-Fragen ('wo ist die RE1', 'Gleis nochmal kontrollieren', "
+    "'aktuelle Verspaetung'): IMMER db_train_live_status aufrufen — "
+    "NIEMALS aus db_departures ableiten. Kein Tool vorhanden -> sage ehrlich: "
+    "'Dafuer habe ich kein Live-Tracking-Tool' statt raten.\n"
+    "- Grund: User koennte zum falschen Gleis rennen. Lieber 'weiss ich nicht' "
+    "als 'Gleis 11'.\n"
     "\n\n"
     "## Notion-Struktur: Medical Records\n"
     "Medical Records hat ZWEI Ebenen:\n\n"
@@ -293,6 +314,17 @@ class ClaudeSubprocess:
                             # Don't resume this broken session next time
                             self._sessions.pop(user_id, None)
                             response.session_id = ""
+                            # Capture for orchestrator: which MCPs are down
+                            response.failed_mcps = failed
+                            # Only set error_type if this is the PRIMARY failure
+                            # (i.e. no response text produced) — don't override
+                            # a successful tool-call just because some other MCP failed
+                            if not response.error_type:
+                                response.error_type = ClaudeErrorType.MCP_FAILED
+                                response.errors.append(
+                                    f"MCP-Server konnten nicht gestartet werden: "
+                                    f"{', '.join(failed)}"
+                                )
 
                     case "assistant":
                         message = event.get("message", {})
@@ -300,6 +332,15 @@ class ClaudeSubprocess:
                             if block.get("type") == "tool_use":
                                 tool_call_count += 1
                                 response.tool_calls = tool_call_count
+                                # Track tool names for hallucination guard
+                                tool_name = block.get("name", "")
+                                if tool_name:
+                                    response.tools_used.append(tool_name)
+                                    logger.debug(
+                                        "claude.tool_call",
+                                        tool=tool_name,
+                                        user_id=user_id,
+                                    )
 
                         # Circuit breaker: max tool calls
                         if tool_call_count >= settings.claude.max_tool_calls:
