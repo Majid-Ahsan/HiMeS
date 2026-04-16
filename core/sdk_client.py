@@ -83,6 +83,11 @@ class SDKClient:
 
     def _build_options(self, system_prompt: str) -> ClaudeCodeOptions:
         """Identische Settings wie claude_subprocess._build_command()."""
+        # Phase 1.5.10e — Experiment: ENABLE_TOOL_SEARCH=false brachte zwar
+        # einen Speed-Gewinn bei Things (22s→8.5s), führte aber parallel zu
+        # CalDAV-Fehlerantworten ("Verbindungsunterbrechung" obwohl Tools
+        # laut Log aufgerufen wurden). Korrelation ungeklärt → Default-
+        # Verhalten (auto) wiederhergestellt. Siehe Changelog v26.
         return ClaudeCodeOptions(
             system_prompt=system_prompt,
             model=settings.claude.model,
