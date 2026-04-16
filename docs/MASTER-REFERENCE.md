@@ -1,5 +1,5 @@
 # HiMeS — MASTER REFERENCE
-> **Version:** v22 · **Stand:** 2026-04-16 · **Pfad:** `docs/MASTER-REFERENCE.md`
+> **Version:** v23 · **Stand:** 2026-04-16 · **Pfad:** `docs/MASTER-REFERENCE.md`
 > **Nutzung:** `Lies docs/MASTER-REFERENCE.md und fahre fort mit Phase [X.Y]: [Task].`
 > **Nach Task:** Status in dieser Datei updaten + committen.
 
@@ -29,8 +29,9 @@
 | 1.5.17 | Kalender Update + Adresse | ✅ | caldav_update_event Tool, Abkürzungen→volle Namen im Prompt, Geocoding für Adressen |
 | 1.5.18 | Multi-Format I/O | ✅ | Foto/Dokument/Voice Input, Media-Output Prompt-Regel, Whisper-Caching |
 | 1.5.19 | DB + VRR Nahverkehr | ✅ | Self-hosted db-rest, VRR-Produkte (U/Tram/Bus), Gleis-Fix, 1+4 Verbindungen, Telegram-Design, zuginfo.nrw, Adress-Routing |
+| 1.5.20 | DB-MCP Stabilisierung + Halluzinations-Schutz | ✅ | 4 Bugs gefixt (DB-FIX-1 bis DB-FIX-4): HallucinationGuard, strukturierte Error-Dicts, Live-Status-Tool, Format-Polish |
 
-**Empfohlene Reihenfolge:** ~~1.5.11~~ → ~~1.5.12~~ → ~~1.5.14~~ → ~~1.5.15~~ → ~~1.5.16~~ → ~~1.5.17~~ → ~~1.5.18~~ → 1.5.5 → 1.5.6 → 1.5.7 → 1.5.9 → 1.5.10 → 1.5.2 → 1.5.3 → 1.5.4 → 1.5.8
+**Empfohlene Reihenfolge:** ~~1.5.11~~ → ~~1.5.12~~ → ~~1.5.14~~ → ~~1.5.15~~ → ~~1.5.16~~ → ~~1.5.17~~ → ~~1.5.18~~ → ~~1.5.19~~ → ~~1.5.20~~ → 1.5.5 → 1.5.6 → 1.5.7 → 1.5.9 → 1.5.10 → 1.5.2 → 1.5.3 → 1.5.4 → 1.5.8
 
 ### Bekannte Bugs (Phase 1.5.11)
 
@@ -59,6 +60,15 @@
 | KAL-1 | ~~Keine Bestätigung nach Terminerstellung~~ | ✅ FIXED | EventCreationResult erweitert: location, description, attendees, reminders_count im Return |
 | KAL-2 | ~~Ort nicht klickbar in Apple Kalender~~ | ✅ FIXED | Auto-Geocoding (Nominatim), GEO-Property + aufgelöste Adresse in LOCATION. X-APPLE-STRUCTURED-LOCATION entfernt (iCloud escaped Komma in geo-URI). iPhone zeigt Karte+Pin. |
 | KAL-3 | ~~Einladungen an Teilnehmer funktionieren nicht~~ | ✅ FIXED | ORGANIZER-Feld + METHOD:REQUEST im VCALENDAR, Env-Vars CALDAV_ORGANIZER_EMAIL/NAME |
+
+### DB-MCP Stabilisierung (Phase 1.5.20)
+
+| # | Bug | Schwere | Fix |
+|---|---|---|---|
+| DB-FIX-1 | ~~Sporadischer "MCP nicht verfügbar"-Fehler~~ | ✅ FIXED | rest_client.py: `_robust_get()` mit strukturierten Error-Dicts `{ok, error, user_message_hint, retry_suggested, status_code, detail}`. Alle public Methoden retournieren Dict statt zu raisen. Tools in server.py forwarden `user_message_hint` verbatim. MCP_FAILED ErrorType + retryable. |
+| DB-FIX-2 | ~~Halluzinierte Zugdaten bei Tool-Fehlern~~ | ✅ FIXED | `core/hallucination_guard.py` (HallucinationGuard Klasse, modular, soft-check). Registriert DB-Domain (Patterns: RE/S/U/Bus/Gleis/Verspätung/Gleiswechsel; Tool-Prefixes: mcp__deutsche-bahn__). Trigger-Fall: Patterns matchen + kein DB-Tool in Turn aufgerufen → Disclaimer anhängen + Warning-Log (niemals Text rewriten). SYSTEM_PROMPT-Regel: NIEMALS konkrete Zugdaten erfinden, Tool-Errors wortwörtlich übernehmen. |
+| DB-FIX-3 | ~~Formatierungs-Inkonsistenzen (⬅️ verwirrt, irrelevante Baustellen)~~ | ✅ FIXED | `_format_journey_row` ohne `⬅️`/`▶️`, stattdessen Prefix-Zeile `↩ frühere Alternativen:` + immer ━━━ Separator. `_is_remark_relevant()` filtert Remarks nach Zeit-Fenster (±30min Toleranz) und Stations-Matching (Off-Route-Hinweise wie "Bauarbeiten Aachen-Stolberg" bei Mülheim-Dortmund werden gedroppt). |
+| DB-FIX-4 | ~~Live-Status-Queries halluziniert (RE1 wo gerade, Verspätung erfunden)~~ | ✅ FIXED | Neues Tool `db_train_live_status(line, station="Mülheim Hbf", duration=120)`. Flow: departures mit `line_name`-Filter → tripId → `/trips/:id` für Live-Daten (Verspätung, aktuelles Gleis vs. planned, Gleisänderungen mit 🔀, nächster Halt, GPS-Position wenn verfügbar, Ausfall-Erkennung). Graceful Fallback auf Departure-Daten wenn /trips/:id failed. |
 
 **Latenz-Problem (10-20s pro Request):**
 ```
@@ -131,7 +141,11 @@ himes/
 │   ├── notion_properties.py        ← Property-Konvertierung (Key-Value ↔ Notion API)
 ├── himes_db/                       ← Deutsche Bahn + VRR MCP (FastMCP, stdio)
 │   ├── server.py · rest_client.py · timetable_client.py · zuginfo_client.py
-├── core/orchestrator.py · claude_subprocess.py
+├── core/orchestrator.py · claude_subprocess.py · hallucination_guard.py
+├── tests/                          ← Unit + Integration Tests (pytest + respx)
+│   ├── conftest.py · test_rest_client.py · test_hallucination_guard.py
+│   └── test_server_tools.py · test_format_polish.py
+├── pytest.ini · requirements-dev.txt
 ├── skills/                         ← Phase 2: Self-evolving Skills
 ├── evals/                          ← Phase 2: Eval System
 ├── data/MEMORY.md                  ← Short-term Memory
@@ -151,7 +165,7 @@ himes/
 | CalDAV | SSE | create_event, update_event, delete_event, get_events, search (+ Auto-Geocoding, ORGANIZER) | ✅ |
 | Time | stdio Python | current_time, convert_time (Europe/Berlin) | ✅ |
 | Weather | stdio TS | forecast, current_conditions, alerts | ✅ |
-| Deutsche Bahn + VRR | stdio Python | db_search_connections (1+4 Verbindungen, alle Verkehrsmittel, Adressen+POIs), db_departures (Züge+S/U-Bahn+Tram+Bus, Farbemojis), db_arrivals, db_find_station (inkl. Adressen), db_nearby_stations, db_trip_details, db_pendler_check, db_nrw_stoerungen (zuginfo.nrw) + 3 Timetable-API-Tools (optional) | ✅ |
+| Deutsche Bahn + VRR | stdio Python | db_search_connections (1+4 Verbindungen, alle Verkehrsmittel, Adressen+POIs), db_departures, db_arrivals, db_find_station, db_nearby_stations, db_trip_details, db_pendler_check, **db_train_live_status** (Live-Tracking: Verspätung, aktuelles Gleis, Gleiswechsel, nächster Halt), db_nrw_stoerungen (zuginfo.nrw) + 3 Timetable-API-Tools (optional). Strukturierte Error-Dicts + HallucinationGuard. | ✅ |
 
 ### Nächste (KRITISCH → HOCH)
 
@@ -309,6 +323,8 @@ Async throughout · Kein Hardcoding (.env) · Logging (structlog) · Circuit Bre
 | 015 | 3-Layer Memory: Short-term MEMORY.md + Mid-term Cognee Graph + Long-term Rules. Skaliert besser als flaches 2-Dateien-System, semantischer Graph baut Beziehungen auf, Rules ändern sich selten | Geplant |
 | 016 | Google Drive als Dateispeicher statt iCloud-Direktzugriff. iCloud hat keine API, Google Drive MCP existiert, iCloud↔Drive Sync als Brücke | Geplant |
 | 017 | DB self-hosted + VRR: derhuerst/db-rest:6 im Docker-Network (Primary) mit v6.db.transport.rest (Fallback). Alle Produkte explizit aktiviert (subway, tram, bus). Journey-Plattformen via departurePlatform/arrivalPlatform. Telegram-optimiertes Output mit Emojis. zuginfo.nrw für NRW-Störungen. Adress-Routing: resolve_location() (Stationen+Adressen+POIs), journeys mit from.type=location für Nicht-Stationen | Aktiv |
+| 018 | Strukturierte Tool-Error-Dicts statt Exception-Propagation: `{ok, error, user_message_hint, retry_suggested, status_code, detail}`. Ersetzt generische "Fehler bei..." Meldungen durch ready-to-use deutsche Hints die Claude verbatim durchreicht → Halluzinations-Reduktion | Aktiv |
+| 019 | Hallucination Guard als Defense-in-Depth: Prompt-Regel (primary) + Regex-Pattern-Guard (safety net). Modulare Domain-Registration (DB, später Kalender/Notion/Weather). Soft-Guard — niemals Text rewriten, nur Disclaimer anhängen + Warning-Log, damit False-Positives nicht UX zerstören | Aktiv |
 
 ---
 
@@ -527,3 +543,4 @@ Regeln: Async, Logging, .env-konfigurierbar.
 | 2026-04-15 | 20 | Phase 1.5.19 ✅: DB+VRR Nahverkehr komplett. Self-hosted db-rest:6, alle HAFAS-Produkte (ICE/IC/RE/RB/S/U/Tram/Bus), Gleis-Fix (departurePlatform/arrivalPlatform), 1+4 Verbindungen, Telegram-Design (Emojis, Farbcodes, _german_date), _smart_truncate, zuginfo.nrw Client, _parse_departure (auto-tomorrow), System Prompt DB-Regeln (time-MCP Pflicht). ADR-017. |
 | 2026-04-15 | 21 | DB Adress-Routing: resolve_location() ersetzt resolve_station() in db_search_connections — unterstützt jetzt Straßenadressen und POIs (Schulen, Gebäude) zusätzlich zu Bahnhöfen. rest_client: locations() mit addresses/poi Params, _set_location_params() für HAFAS from.type=location, journeys() akzeptiert str|dict. Fußwege als 🚶 mit Dauer. db_find_station mit include_addresses Option. |
 | 2026-04-16 | 22 | DB Nominatim-Geocoding: HAFAS löste Adressen falsch auf (Otto-Pankok-Schule→Schule Blücherstr., Am Rathaus→Rathausmarkt). Fix: Nominatim-Geocoding (wie CalDAV) in resolve_location() integriert. _looks_like_station() Heuristik: Station-Keywords→HAFAS, Adress-Keywords (Schule/Straße/Hospital/Klinik)→Nominatim, Ziffern→Nominatim. _geocode_nominatim() async via run_in_executor, Mülheim als Default-Stadt-Kontext, _location_cache. _set_location_params() mit from.address statt from.name, keine Fake-IDs an HAFAS. |
+| 2026-04-16 | 23 | Phase 1.5.20 ✅: DB-MCP Stabilisierung + Halluzinations-Schutz. 4 Bugs gefixt — DB-FIX-1 (rest_client._robust_get mit strukturierten Error-Dicts {ok, error, user_message_hint, retry_suggested, status_code, detail}, alle public Methoden retournieren Dict statt raisen, server.py-Tools forwarden user_message_hint verbatim, neuer MCP_FAILED ErrorType als retryable), DB-FIX-2 (core/hallucination_guard.py: modulare HallucinationGuard Klasse mit registrierbaren Domains, DB-Patterns für RE/S/U/Bus/Gleis/Verspätung/Gleiswechsel, soft-check appended nur Disclaimer + Warning-Log, Orchestrator-Integration, harte SYSTEM_PROMPT-Regel "NIEMALS konkrete Zugdaten erfinden"), DB-FIX-4 (neues Tool db_train_live_status — /trips/:id Live-Daten: Verspätung, Gleis vs. planned, Gleisänderungen 🔀, nächster Halt, GPS; graceful fallback), DB-FIX-3 (↩ Prefix-Zeile statt ⬅️ Marker im Row, immer ━━━ Separator, _is_remark_relevant filtert Baustellen nach Zeit±30min + Stations-Matching). ADR-018, ADR-019. Tests-Infrastruktur: pytest.ini, tests/ mit respx HTTPX-Mocking, requirements-dev.txt. 60+ Unit+Integration Tests (alle grün lokal + Docker). |
