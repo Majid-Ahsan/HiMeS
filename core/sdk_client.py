@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import date
 from typing import Callable
 
 import structlog
@@ -72,7 +73,10 @@ class SDKClient:
         self._build_system_prompt = build_system_prompt
         self._client: ClaudeSDKClient | None = None
         self._lock = asyncio.Lock()
-        self._current_system_prompt: str | None = None
+        # Restart nur bei Tageswechsel — nicht bei Minuten-Änderung der
+        # Uhrzeit im System-Prompt (sonst würde jede Nachricht in einer
+        # neuen Minute einen ~4s Reconnect auslösen).
+        self._current_day: date | None = None
         self._restart_count = 0
 
     # ── Options / Lifecycle ────────────────────────────────────────────────
@@ -97,7 +101,7 @@ class SDKClient:
             return
 
         prompt = self._build_system_prompt()
-        self._current_system_prompt = prompt
+        self._current_day = date.today()
         options = self._build_options(prompt)
 
         t0 = time.perf_counter()
@@ -121,13 +125,14 @@ class SDKClient:
             self._client = None
             logger.info("sdk_client.shutdown")
 
-    async def _restart(self, new_prompt: str) -> None:
-        """Client neu starten (z.B. bei Datumswechsel oder Fehler)."""
+    async def _restart(self) -> None:
+        """Client neu starten (z.B. bei Tageswechsel oder Fehler)."""
         self._restart_count += 1
         logger.info("sdk_client.restarting", restart_count=self._restart_count)
         await self.shutdown()
-        self._current_system_prompt = new_prompt
-        options = self._build_options(new_prompt)
+        prompt = self._build_system_prompt()
+        self._current_day = date.today()
+        options = self._build_options(prompt)
         self._client = ClaudeSDKClient(options=options)
         await self._client.connect()
 
@@ -143,12 +148,18 @@ class SDKClient:
         t0 = time.perf_counter()
 
         async with self._lock:
-            # Datumswechsel? Dann System-Prompt neu bauen und Client neu starten.
-            fresh_prompt = self._build_system_prompt()
-            if fresh_prompt != self._current_system_prompt:
-                logger.info("sdk_client.system_prompt_changed")
+            # Tageswechsel → Restart (damit Datum im System-Prompt stimmt).
+            # Minuten-Drift der Uhrzeit ist egal: Claude nutzt bei relativen
+            # Zeitangaben sowieso das time-MCP-Tool.
+            today = date.today()
+            if self._current_day is not None and today != self._current_day:
+                logger.info(
+                    "sdk_client.day_changed",
+                    previous=str(self._current_day),
+                    current=str(today),
+                )
                 try:
-                    await self._restart(fresh_prompt)
+                    await self._restart()
                 except Exception as exc:
                     logger.error("sdk_client.restart_failed", error=str(exc))
                     response.error_type = ClaudeErrorType.SUBPROCESS_CRASH
@@ -168,6 +179,12 @@ class SDKClient:
             client = self._client
             assert client is not None
 
+            # Gesammelte Zwischentexte (Claude's "Denken" zwischen Tool-Calls) —
+            # nur als Fallback verwendet, falls ResultMessage.result leer ist.
+            # Sonst würde "Ich lade zuerst das Tool-Schema..." vor der finalen
+            # Antwort landen (Regression gegenüber CLI-Subprocess-Weg).
+            intermediate_text = ""
+
             try:
                 await client.query(prompt)
 
@@ -180,7 +197,7 @@ class SDKClient:
                     if isinstance(msg, AssistantMessage):
                         for block in msg.content:
                             if isinstance(block, TextBlock):
-                                response.text += block.text
+                                intermediate_text += block.text
                             elif isinstance(block, ToolUseBlock):
                                 tool_call_count += 1
                                 response.tools_used.append(block.name)
@@ -209,15 +226,19 @@ class SDKClient:
                         duration = getattr(msg, "duration_ms", 0.0) or 0.0
                         response.duration_ms = float(duration)
 
-                        # Wenn ResultMessage.result gesetzt und wir noch keinen
-                        # Text gesammelt haben — fallback.
+                        # Source of truth: ResultMessage.result. Das entspricht
+                        # exakt dem was der CLI-Subprocess als finale Antwort
+                        # liefert (ohne Denk-Zwischentexte). Nur als Fallback:
+                        # gesammelter intermediate_text.
                         result_text = getattr(msg, "result", None)
-                        if result_text and not response.text:
+                        if result_text:
                             response.text = (
                                 result_text
                                 if isinstance(result_text, str)
                                 else str(result_text)
                             )
+                        elif intermediate_text:
+                            response.text = intermediate_text
 
                         subtype = getattr(msg, "subtype", "")
                         if subtype == "error_max_turns" and not response.text:
@@ -228,6 +249,10 @@ class SDKClient:
                                 "Frage."
                             )
                         break  # ResultMessage = Ende der Antwort
+                else:
+                    # Stream endete ohne ResultMessage — gesammelten Text nehmen
+                    if intermediate_text and not response.text:
+                        response.text = intermediate_text
 
             except Exception as exc:
                 logger.error(
@@ -245,7 +270,7 @@ class SDKClient:
                 except Exception:
                     pass
                 self._client = None
-                self._current_system_prompt = None
+                self._current_day = None
 
         response.duration_ms = response.duration_ms or (
             (time.perf_counter() - t0) * 1000
