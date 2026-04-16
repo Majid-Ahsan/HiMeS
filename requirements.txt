@@ -30,3 +30,6 @@ fastapi==0.115.12
 
 # Process management
 psutil==6.1.1
+
+# Claude Code SDK (programmatic access)
+claude-code-sdk>=0.0.25
