@@ -36,6 +36,26 @@ DORTMUND_EVA = "8000080"
 TZ_BERLIN = ZoneInfo("Europe/Berlin")
 
 
+# ── Structured-result helpers (DB-FIX-1) ─────────────────────────────
+
+def _fmt_error(result: dict, context: str = "") -> str:
+    """Format a structured error result as a user-facing tool output.
+
+    Forwards the `user_message_hint` VERBATIM so Claude passes it through
+    to the user without inventing alternative phrasings.
+    The Halluzinations-Verbot im System Prompt tells Claude to use this hint.
+    """
+    hint = result.get("user_message_hint", "Unbekannter Fehler bei der DB-API.")
+    error_kind = result.get("error", "unknown")
+    log.warning(
+        "tool.error_result",
+        context=context, kind=error_kind,
+        status=result.get("status_code"),
+        retry=result.get("retry_suggested"),
+    )
+    return f"⚠️ {hint}"
+
+
 # ── Formatting helpers ────────────────────────────────────────────────
 
 def _format_time(iso_str: str | None) -> str:
@@ -421,8 +441,15 @@ async def db_search_connections(
 ) -> str:
     """Search connections A->B. Shows 1 earlier + 3 later connections around the requested time."""
     try:
-        from_loc = await rest_client.resolve_location(from_station)
-        to_loc = await rest_client.resolve_location(to_station)
+        from_result = await rest_client.resolve_location(from_station)
+        if not from_result.get("ok"):
+            return _fmt_error(from_result, context=f"resolve_location:{from_station}")
+        from_loc = from_result["data"]
+
+        to_result = await rest_client.resolve_location(to_station)
+        if not to_result.get("ok"):
+            return _fmt_error(to_result, context=f"resolve_location:{to_station}")
+        to_loc = to_result["data"]
 
         requested_dt: datetime | None = None
         earlier_departure: str | None = None
@@ -438,13 +465,16 @@ async def db_search_connections(
 
         if earlier_departure and requested_dt:
             # Fetch from 45 min earlier with extra results to find 1 before + 4 after
-            data = await rest_client.journeys(
+            journey_result = await rest_client.journeys(
                 from_loc, to_loc,
                 departure=earlier_departure,
                 results=10,
                 transfers=transfers,
                 regional_only=regional_only,
             )
+            if not journey_result.get("ok"):
+                return _fmt_error(journey_result, context="journeys:smart_split")
+            data = journey_result["data"]
             all_journeys = data.get("journeys", [])
 
             # Split into before/after requested time
@@ -463,7 +493,7 @@ async def db_search_connections(
             journeys = selected_before + selected_after
         else:
             # Normal query (no smart split)
-            data = await rest_client.journeys(
+            journey_result = await rest_client.journeys(
                 from_loc, to_loc,
                 departure=departure,
                 arrival=arrival,
@@ -471,6 +501,9 @@ async def db_search_connections(
                 transfers=transfers,
                 regional_only=regional_only,
             )
+            if not journey_result.get("ok"):
+                return _fmt_error(journey_result, context="journeys:direct")
+            data = journey_result["data"]
             journeys = data.get("journeys", [])[:5]
             requested_dt = None  # No split marker
 
@@ -526,11 +559,18 @@ async def db_departures(
     """Show departures at a station (all transport types: ICE/IC/RE/RB/S-Bahn/U-Bahn/Tram/Bus)."""
     try:
         import re as _re
-        station_id = await rest_client.resolve_station(station)
-        deps = await rest_client.departures(
+        try:
+            station_id = await rest_client.resolve_station(station)
+        except ValueError as ve:
+            return f"⚠️ {ve}"
+
+        dep_result = await rest_client.departures(
             station_id, duration=duration, results=results,
             include_local=not only_trains,
         )
+        if not dep_result.get("ok"):
+            return _fmt_error(dep_result, context=f"departures:{station}")
+        deps = dep_result["data"]
 
         if not deps:
             return f"Keine Abfahrten gefunden: {station}"
@@ -598,11 +638,18 @@ async def db_arrivals(
 ) -> str:
     """Show arrivals at a station (all transport types)."""
     try:
-        station_id = await rest_client.resolve_station(station)
-        arrs = await rest_client.arrivals(
+        try:
+            station_id = await rest_client.resolve_station(station)
+        except ValueError as ve:
+            return f"⚠️ {ve}"
+
+        arr_result = await rest_client.arrivals(
             station_id, duration=duration, results=results,
             include_local=not only_trains,
         )
+        if not arr_result.get("ok"):
+            return _fmt_error(arr_result, context=f"arrivals:{station}")
+        arrs = arr_result["data"]
 
         if not arrs:
             return f"Keine Ankuenfte gefunden: {station}"
@@ -664,10 +711,13 @@ async def db_find_station(
 ) -> str:
     """Search for stations by name (includes local transport stops). Set include_addresses=True for street addresses and POIs."""
     try:
-        locations = await rest_client.locations(
+        loc_result = await rest_client.locations(
             query, results=results,
             addresses=include_addresses, poi=include_addresses,
         )
+        if not loc_result.get("ok"):
+            return _fmt_error(loc_result, context=f"locations:{query}")
+        locations = loc_result["data"]
 
         if not locations:
             return f"Keine Stationen gefunden: {query}"
@@ -707,7 +757,12 @@ async def db_nearby_stations(
 ) -> str:
     """Find stations near a GPS position."""
     try:
-        locations = await rest_client.nearby(latitude, longitude, distance=distance, results=results)
+        nearby_result = await rest_client.nearby(
+            latitude, longitude, distance=distance, results=results
+        )
+        if not nearby_result.get("ok"):
+            return _fmt_error(nearby_result, context=f"nearby:{latitude},{longitude}")
+        locations = nearby_result["data"]
 
         if not locations:
             return f"Keine Stationen im Umkreis von {distance}m gefunden."
@@ -737,7 +792,10 @@ async def db_trip_details(
 ) -> str:
     """Show details of a specific trip."""
     try:
-        data = await rest_client.trip(trip_id)
+        trip_result = await rest_client.trip(trip_id)
+        if not trip_result.get("ok"):
+            return _fmt_error(trip_result, context=f"trip:{trip_id}")
+        data = trip_result["data"]
 
         trip = data.get("trip", data)
         line_name = _get_line_name(trip)
@@ -816,13 +874,23 @@ async def db_pendler_check(
             earlier_departure = departure
 
         if requested_dt:
-            data = await rest_client.journeys(from_id, to_id, departure=earlier_departure, results=10)
+            journey_result = await rest_client.journeys(
+                from_id, to_id, departure=earlier_departure, results=10
+            )
+            if not journey_result.get("ok"):
+                return _fmt_error(journey_result, context="pendler:smart_split")
+            data = journey_result["data"]
             all_journeys = data.get("journeys", [])
             before = [j for j in all_journeys if (_get_journey_dep_dt(j) or requested_dt) < requested_dt]
             after = [j for j in all_journeys if (_get_journey_dep_dt(j) or requested_dt) >= requested_dt]
             journeys = before[-1:] + after[:4]
         else:
-            data = await rest_client.journeys(from_id, to_id, departure=departure, results=5)
+            journey_result = await rest_client.journeys(
+                from_id, to_id, departure=departure, results=5
+            )
+            if not journey_result.get("ok"):
+                return _fmt_error(journey_result, context="pendler:direct")
+            data = journey_result["data"]
             journeys = data.get("journeys", [])[:5]
 
         if not journeys:
