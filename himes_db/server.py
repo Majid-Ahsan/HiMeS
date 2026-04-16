@@ -215,6 +215,96 @@ def _get_remarks(item: dict, max_remarks: int = 2) -> list[str]:
     return result
 
 
+def _is_remark_relevant(
+    remark: dict,
+    journey_start: datetime | None,
+    journey_end: datetime | None,
+    journey_stations: set[str],
+    tolerance_min: int = 30,
+) -> bool:
+    """Check if a remark is relevant to the shown journey.
+
+    A remark is relevant if:
+    - Its validity window overlaps with the journey (± tolerance_min minutes), AND
+    - It mentions at least one station on the journey route (if route info given)
+
+    Unknown windows/routes default to "relevant" to avoid dropping real issues.
+    """
+    # Time window check
+    valid_from = remark.get("validFrom") or remark.get("startAt") or remark.get("modified")
+    valid_to = remark.get("validUntil") or remark.get("endAt")
+
+    if valid_from and journey_end:
+        try:
+            vf = datetime.fromisoformat(valid_from)
+            if vf.astimezone(TZ_BERLIN) > journey_end.astimezone(TZ_BERLIN) + timedelta(minutes=tolerance_min):
+                return False  # Remark starts after journey ends
+        except (ValueError, TypeError):
+            pass
+
+    if valid_to and journey_start:
+        try:
+            vt = datetime.fromisoformat(valid_to)
+            if vt.astimezone(TZ_BERLIN) < journey_start.astimezone(TZ_BERLIN) - timedelta(minutes=tolerance_min):
+                return False  # Remark ended before journey starts
+        except (ValueError, TypeError):
+            pass
+
+    # Route/location check — only if we have station context
+    if journey_stations:
+        text = (remark.get("text", "") + " " + remark.get("summary", "")).lower()
+        if not text.strip():
+            return True  # No text to check — keep
+        # If the remark mentions ANY station from the journey, it's relevant
+        for station in journey_stations:
+            station_clean = _strip_station_name(station).lower()
+            if station_clean and len(station_clean) >= 4 and station_clean in text:
+                return True
+        # If the remark mentions other specific station names that are NOT on
+        # our route → likely not relevant (e.g. "Aachen-Stolberg" for Mülheim-Dortmund)
+        # We detect this by checking for city keywords
+        import re as _re
+        # Find capitalised words in original-case text that look like station names
+        orig_text = remark.get("text", "") + " " + remark.get("summary", "")
+        city_candidates = _re.findall(
+            r'\b[A-ZÄÖÜ][a-zäöüß]{3,}(?:[-\s][A-ZÄÖÜ][a-zäöüß]{2,})?\b',
+            orig_text,
+        )
+        if city_candidates:
+            # If we found city names but none match our journey → filter out
+            return False
+        return True  # No city hints either way → keep
+
+    return True  # No station context → keep
+
+
+def _strip_station_name(name: str) -> str:
+    """Normalise station name for matching: 'Mülheim(Ruhr)Hbf' → 'mülheim'."""
+    import re as _re
+    name = _re.sub(r'\s*\([^)]*\)\s*', ' ', name)
+    name = _re.sub(r'\b(Hbf|Hauptbahnhof|Bahnhof|Bf)\b', '', name, flags=_re.IGNORECASE)
+    return name.strip().split(",")[0].strip()
+
+
+def _collect_journey_stations(journey: dict) -> set[str]:
+    """Collect all station names from a journey (origin, destination, stopovers)."""
+    stations: set[str] = set()
+    legs = journey.get("legs", [])
+    for leg in legs:
+        orig = (leg.get("origin") or {}).get("name", "")
+        dest = (leg.get("destination") or {}).get("name", "")
+        if orig:
+            stations.add(orig)
+        if dest:
+            stations.add(dest)
+        # Also include intermediate stopovers if present
+        for sov in leg.get("stopovers") or []:
+            sn = (sov.get("stop") or {}).get("name", "")
+            if sn:
+                stations.add(sn)
+    return stations
+
+
 # ── German day names ─────────────────────────────────────────────────
 
 _DE_DAYS = {0: "Mo", 1: "Di", 2: "Mi", 3: "Do", 4: "Fr", 5: "Sa", 6: "So"}
@@ -232,7 +322,11 @@ def _format_journey_row(journey: dict, is_earlier: bool = False) -> str:
     """Format a single journey as a beautiful Telegram-ready row.
 
     Returns format like:
-      ◽ 06:44 → 07:14  RE1 nach Hamm  ·  30min  ·  Gl. 1→10  ✅
+      06:44 → 07:14  RE1 nach Hamm
+         30min · Gl. 1→10 · ✅
+
+    The is_earlier flag is handled at the caller (prefix line "↩ früher:"),
+    not as a per-row marker — keeps the row layout consistent.
     """
     legs = journey.get("legs", [])
     if not legs:
@@ -330,7 +424,17 @@ def _format_journey_row(journey: dict, is_earlier: bool = False) -> str:
     else:
         status_icon = "✅"
 
-    # Remarks (first meaningful disruption only)
+    # Remarks — filter by relevance (time window overlap + station matching)
+    journey_start = _get_journey_dep_dt(journey)
+    last_arr_str = last_leg.get("arrival") or last_leg.get("plannedArrival")
+    journey_end: datetime | None = None
+    if last_arr_str:
+        try:
+            journey_end = datetime.fromisoformat(last_arr_str)
+        except (ValueError, TypeError):
+            journey_end = None
+    journey_stations = _collect_journey_stations(journey)
+
     remark_line = ""
     for leg in legs:
         for r in leg.get("remarks", []):
@@ -338,15 +442,19 @@ def _format_journey_row(journey: dict, is_earlier: bool = False) -> str:
             text = r.get("text", r.get("summary", ""))
             if not text or text.startswith("$") or text.startswith('"$') or len(text) < 5:
                 continue
-            if rtype in ("warning", "status"):
-                remark_line = f"\n   ⚠️ {_smart_truncate(text)}"
-                break
+            if rtype not in ("warning", "status"):
+                continue
+            # Relevance filter: time window + station match
+            if not _is_remark_relevant(r, journey_start, journey_end, journey_stations):
+                continue
+            remark_line = f"\n   ⚠️ {_smart_truncate(text)}"
+            break
         if remark_line:
             break
 
-    # Build beautiful row
-    marker = "⬅️" if is_earlier else "▶️"
-    line1 = f"{marker} {dep_time} → {arr_time}  {trains} nach {final_dest}"
+    # Build beautiful row — no per-row marker, chronological order + prefix line
+    # handles "earlier" semantics at the caller level
+    line1 = f"🚆 {dep_time} → {arr_time}  {trains} nach {final_dest}"
     line2_parts = [duration]
     if gl_str:
         line2_parts.append(gl_str)
@@ -522,16 +630,22 @@ async def db_search_connections(
             lines.append(f"📅 {date_str}")
         lines.append("")
 
-        # Format each journey
+        # Format each journey — consistent layout: prefix line for earlier,
+        # ━━━ separator always shown when requested_dt split is active
         separator_shown = False
+        earlier_header_shown = False
         for journey in journeys:
             jdt = _get_journey_dep_dt(journey)
             is_earlier = bool(requested_dt and jdt and jdt < requested_dt)
 
-            # Show separator between before/after
+            # Prefix line for earlier alternatives
+            if is_earlier and not earlier_header_shown:
+                lines.append("↩ frühere Alternativen:")
+                earlier_header_shown = True
+
+            # Separator between before/after (always shown when split applies)
             if requested_dt and not separator_shown and jdt and jdt >= requested_dt:
-                if any(not line.startswith("🚆") and not line.startswith("📅") and line.strip() for line in lines):
-                    lines.append(f"━━━ ab {req_time_str} ━━━━━━━━━━")
+                lines.append(f"━━━ ab {req_time_str} ━━━━━━━━━━")
                 separator_shown = True
 
             row = _format_journey_row(journey, is_earlier=is_earlier)
@@ -907,14 +1021,18 @@ async def db_pendler_check(
 
         req_time_str = requested_dt.astimezone(TZ_BERLIN).strftime("%H:%M") if requested_dt else ""
         separator_shown = False
+        earlier_header_shown = False
 
         for journey in journeys:
             jdt = _get_journey_dep_dt(journey)
             is_earlier = bool(requested_dt and jdt and jdt < requested_dt)
 
+            if is_earlier and not earlier_header_shown:
+                lines.append("↩ frühere Alternativen:")
+                earlier_header_shown = True
+
             if requested_dt and not separator_shown and jdt and jdt >= requested_dt:
-                if any(not line.startswith("🚆") and not line.startswith("📅") and line.strip() for line in lines):
-                    lines.append(f"━━━ ab {req_time_str} ━━━━━━━━━━")
+                lines.append(f"━━━ ab {req_time_str} ━━━━━━━━━━")
                 separator_shown = True
 
             lines.append(_format_journey_row(journey, is_earlier=is_earlier))
