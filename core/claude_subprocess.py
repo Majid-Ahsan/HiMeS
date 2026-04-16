@@ -37,6 +37,7 @@ class ClaudeResponse:
     error_type: str = ""
     tools_used: list[str] = field(default_factory=list)  # tool names called in this turn
     failed_mcps: list[str] = field(default_factory=list)  # MCP servers that failed on startup
+    pending_mcps: list[str] = field(default_factory=list)  # MCP servers not yet connected at init
 
 
 SYSTEM_PROMPT = (
@@ -327,6 +328,7 @@ class ClaudeSubprocess:
                                 status=srv.get("status"),
                             )
                         failed = [s["name"] for s in mcp_servers if s.get("status") == "failed"]
+                        pending = [s["name"] for s in mcp_servers if s.get("status") == "pending"]
                         if failed:
                             logger.warning("claude.mcp_failed", servers=failed, user_id=user_id)
                             # Don't resume this broken session next time
@@ -343,6 +345,15 @@ class ClaudeSubprocess:
                                     f"MCP-Server konnten nicht gestartet werden: "
                                     f"{', '.join(failed)}"
                                 )
+                        if pending:
+                            # Pending MCPs → their tools aren't in Claude's tool list yet.
+                            # Log for orchestrator to consider auto-retry if Claude refuses
+                            # due to "tool not available".
+                            logger.info(
+                                "claude.mcp_pending",
+                                servers=pending, user_id=user_id,
+                            )
+                            response.pending_mcps = pending
 
                     case "assistant":
                         message = event.get("message", {})

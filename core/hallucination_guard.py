@@ -73,7 +73,7 @@ class HallucinationGuard:
         log.info("guard.domain_registered", domain=name,
                  patterns=len(compiled), prefixes=tool_prefixes)
 
-    # Negation phrases — if present within ~100 chars of a pattern match,
+    # Negation phrases — if present within ~150 chars of a pattern match,
     # the text is a refusal/recommendation, not a factual claim → no trigger
     _NEGATION_PHRASES = (
         "kein live-tracking",
@@ -100,6 +100,20 @@ class HallucinationGuard:
         "ohne live-verifikation",  # our own disclaimer — avoid re-triggering
     )
 
+    # Strong global refusal markers — if ANY of these appear ANYWHERE in the text,
+    # the whole message is treated as a refusal/recommendation response and
+    # no domain check runs. Prefer false-negatives over UX-destroying disclaimers.
+    _GLOBAL_REFUSAL_MARKERS = (
+        "nicht verfügbar",
+        "nicht verfuegbar",
+        "dafür habe ich kein",
+        "dafuer habe ich kein",
+        "ich habe kein live-tracking",
+        "ich habe gerade kein",
+        "db navigator app",
+        "ohne live-verifikation",  # our own disclaimer sentinel
+    )
+
     @classmethod
     def _is_near_negation(cls, text: str, match_start: int, match_end: int,
                           window: int = 150) -> bool:
@@ -122,10 +136,24 @@ class HallucinationGuard:
             If suspect, returns (True, disclaimer_text_to_append).
             When multiple domains flag, disclaimers are joined with newlines.
 
-        Negation-aware: pattern matches in refusal context ("kein Tool",
-        "empfehle die App", etc.) are NOT counted as claims.
+        Two-tier negation-aware:
+        1. Global refusal short-circuit — if the whole message is a refusal
+           response (contains strong refusal markers anywhere), skip all domain
+           checks. Prefers false-negatives over UX-destroying disclaimers.
+        2. Local negation-aware — pattern matches near refusal phrases (±150
+           chars) are not counted as claims.
         """
         if not text or not self._domains:
+            return False, ""
+
+        # Global refusal short-circuit
+        lower = text.lower()
+        if any(marker in lower for marker in self._GLOBAL_REFUSAL_MARKERS):
+            log.debug(
+                "guard.global_refusal_skip",
+                text_len=len(text),
+                matched_marker=next(m for m in self._GLOBAL_REFUSAL_MARKERS if m in lower),
+            )
             return False, ""
 
         disclaimers: list[str] = []

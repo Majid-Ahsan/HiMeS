@@ -106,6 +106,28 @@ class Orchestrator:
         ClaudeErrorType.MCP_FAILED,
     }
 
+    # Phrases that indicate Claude refused to use a tool it couldn't see
+    # (pending MCP race). Used to trigger auto-retry.
+    _TOOL_REFUSAL_MARKERS = (
+        "tools sind gerade nicht verfügbar",
+        "tools sind gerade nicht verfuegbar",
+        "tool nicht verfügbar",
+        "tool nicht verfuegbar",
+        "deutsche bahn tools sind",
+        "kein tool verfügbar",
+        "kein tool verfuegbar",
+        "kann den aktuellen standort",
+        "kann den aktuellen status",
+    )
+
+    @classmethod
+    def _looks_like_tool_refusal(cls, text: str) -> bool:
+        """Heuristic: did Claude refuse because a tool appeared missing?"""
+        if not text:
+            return False
+        lower = text.lower()
+        return any(marker in lower for marker in cls._TOOL_REFUSAL_MARKERS)
+
     async def _handle_message(
         self, user_id: int, text: str, attachments: list[str] | None = None
     ) -> str:
@@ -189,6 +211,39 @@ class Orchestrator:
 
         if not response.text:
             return "Keine Antwort von Claude erhalten."
+
+        # ── Pending-MCP auto-retry ──
+        # Race condition: if an MCP was "pending" at init, its tools aren't
+        # in Claude's tool list. Claude may refuse the request as "tool not
+        # available" without calling it. Detect this pattern and retry ONCE
+        # with a fresh session (MCPs have more time to initialise).
+        if (
+            response.pending_mcps
+            and response.tool_calls == 0
+            and self._looks_like_tool_refusal(response.text)
+        ):
+            logger.warning(
+                "orchestrator.pending_mcp_retry",
+                user_id=user_id,
+                pending_mcps=response.pending_mcps,
+                text_preview=response.text[:120],
+            )
+            self._claude.clear_session(user_id)
+            # Small pause to let MCPs finish starting
+            await asyncio.sleep(2)
+            retry_response = await self._claude.send(user_id, text)
+            if retry_response.text and retry_response.tool_calls > 0:
+                logger.info(
+                    "orchestrator.pending_mcp_retry_success",
+                    user_id=user_id,
+                    tools_used=retry_response.tools_used,
+                )
+                response = retry_response
+            else:
+                logger.info(
+                    "orchestrator.pending_mcp_retry_no_improvement",
+                    user_id=user_id,
+                )
 
         # Hallucination guard — soft check: append disclaimer if output claims
         # domain-specific data (train numbers, Gleise, delays) but no tool from

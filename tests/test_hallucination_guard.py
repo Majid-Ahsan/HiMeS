@@ -227,9 +227,14 @@ class TestHallucinationGuard:
 
         Edge case: Claude says 'ich habe kein Tool' but then 'die S1 um 08:15'
         in unrelated sentence. The S1 claim is far from negation → triggers.
+
+        NOTE: After DB-FIX-5.1, if ANY global refusal marker is present, the
+        whole message is treated as refusal (false-negatives preferred). So
+        this test uses weak/no global markers — only local 'kein Tracking-Tool'.
         """
         guard = build_default_guard()
-        # Lots of unrelated filler to ensure claim is far from negation phrases
+        # Use a local-only refusal phrase (not in _GLOBAL_REFUSAL_MARKERS)
+        # so the global-refusal short-circuit doesn't fire.
         filler = " Irgendein langer Text ohne Bezug. " * 15
         text = (
             "Für die RE1 habe ich kein Tracking-Tool."
@@ -237,5 +242,39 @@ class TestHallucinationGuard:
             + "Die S1 fährt um 08:15 von Gleis 3."
         )
         suspect, disc = guard.check(text, [])
-        # The S1 claim is far from any negation → should trigger
+        # "kein tracking" is in local negation but not global refusal
+        # The S1 claim is far from any negation → should still trigger
         assert suspect is True
+
+    # ── Global refusal short-circuit (DB-FIX-5.1) ──
+
+    def test_global_refusal_skips_entire_check(self):
+        """Real-world case: 'Tools sind gerade nicht verfügbar' + mentions S3
+        twice, last one far from any local negation. Previously triggered.
+        Now: global refusal marker 'nicht verfügbar' short-circuits."""
+        guard = build_default_guard()
+        text = (
+            "Entschuldigung, die Deutsche Bahn Tools sind gerade nicht verfügbar. "
+            "Ich kann den aktuellen Standort der S3 momentan nicht abfragen.\n\n"
+            "Für aktuelle Live-Informationen zur S3 empfehle ich dir:\n"
+            "- DB Navigator App\n- bahn.de\n- VRR-App\n\n"
+            "Alternativ kannst du auch am Bahnhof auf den Anzeigetafeln oder über "
+            "die Bahnhofsdurchsagen die aktuellen Infos zur S3 bekommen."
+        )
+        suspect, disc = guard.check(text, [])
+        assert suspect is False, f"Global refusal should skip. Disclaimer: {disc}"
+
+    def test_global_refusal_db_navigator_keyword(self):
+        guard = build_default_guard()
+        text = "Nutze die DB Navigator App für aktuelle Infos zur RE1 um 07:30."
+        suspect, disc = guard.check(text, [])
+        # Global marker "db navigator app" triggers skip
+        assert suspect is False
+
+    def test_own_disclaimer_global_short_circuit(self):
+        """Our own disclaimer text contains 'ohne live-verifikation' marker —
+        must not retrigger guard on paraphrased-by-user messages."""
+        guard = build_default_guard()
+        text = "Die RE1 um 07:35 — ⚠️ Ohne Live-Verifikation, Daten nicht bestätigt."
+        suspect, disc = guard.check(text, [])
+        assert suspect is False
