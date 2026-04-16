@@ -21,7 +21,7 @@
 | 1.5.7 | System Prompt extern | 🔶 | In prompts/system.md auslagern (Prompt selbst ✅, dynamisches Datum ✅) |
 | 1.5.8 | Health Monitoring | ⬜ | Self-Check + Telegram Alert |
 | 1.5.9 | Brave Search MCP | ⬜ | mcp_config.json + BRAVE_API_KEY |
-| 1.5.10 | Latenz-Optimierung | ✅ | Typing-Indikator ✅ (4s-Loop), Pre-Classification ✅ (Instant Replies), claude-code-sdk Integration ✅ (persistenter Singleton-Client, Subprocess-Fallback, Daily-Restart via date.today(), ResultMessage.result als Source-of-Truth). Gemessen: Folge-Nachrichten ~15s statt ~30s, kurze Frage ohne Tool ~4s. |
+| 1.5.10 | Latenz-Optimierung | ✅ | Typing-Indikator ✅ (4s-Loop), Pre-Classification ✅ (Instant Replies), claude-code-sdk Integration ✅ (persistenter Singleton-Client, Subprocess-Fallback, Daily-Restart via date.today(), ResultMessage.result als Source-of-Truth). Gemessen: Folge-Nachrichten ~15s statt ~30s, kurze Frage ohne Tool ~4s. **1.5.10e (ToolSearch-Off via env-Var) reverted — offen für 2. Anlauf mit allowed_tools-Whitelist.** |
 | 1.5.12 | Rich Media Output | ✅ | Deployed+getestet: Notion-Fotos ✅, PDF/Audio/Location Parser bereit (Maps MCP fehlt noch) |
 | 1.5.14 | Notion Query Bugs | ✅ | 5 Bugs: Relation-Filter, DB-Zuordnung, Query-Strategie, Fallback, Parent-Kontext |
 | 1.5.15 | Kalender-Bugs | ✅ | 3 Bugs: Bestätigung nach Erstellung, Apple-Maps-Ort, ORGANIZER für Einladungen |
@@ -31,8 +31,60 @@
 | 1.5.19 | DB + VRR Nahverkehr | ✅ | Self-hosted db-rest, VRR-Produkte (U/Tram/Bus), Gleis-Fix, 1+4 Verbindungen, Telegram-Design, zuginfo.nrw, Adress-Routing |
 | 1.5.20 | DB-MCP Stabilisierung + Halluzinations-Schutz | ✅ | 4 Bugs gefixt (DB-FIX-1 bis DB-FIX-4): HallucinationGuard, strukturierte Error-Dicts, Live-Status-Tool, Format-Polish |
 | 1.5.21 | CalDAV Stabilität | ✅ | 3 Bugs gefixt (in caldav-mcp Repo): Starlette-SSE-Route returnt Response statt None, Phase-1.5.15-Extensions committet (Nominatim/update_event/ORGANIZER), Retry-Decorator auf 9 Apple-facing Methoden bei keepalive timeout. 95 Unit-Tests + 1 E2E-Smoke-Test, live mit injiziertem NiqConnError verifiziert. |
+| 1.5.22 | Zukunfts-Architektur vorbereiten | ⬜ | Rückwärtskompatible Vorbereitungen für Phase 2: ClaudeBackend-Interface, UserContext durchreichen, MCP-Kategorisierung, Deployment-Standard. Macht Multi-User/Sub-Agents/Dynamic-MCP später ohne großes Refactoring möglich. Siehe Sektion 2a. |
 
-**Empfohlene Reihenfolge:** ~~1.5.11~~ → ~~1.5.12~~ → ~~1.5.14~~ → ~~1.5.15~~ → ~~1.5.16~~ → ~~1.5.17~~ → ~~1.5.18~~ → ~~1.5.19~~ → ~~1.5.20~~ → ~~1.5.10~~ → ~~1.5.21~~ → 1.5.5 → 1.5.6 → 1.5.7 → 1.5.9 → 1.5.2 → 1.5.3 → 1.5.4 → 1.5.8
+**Empfohlene Reihenfolge:** ~~1.5.11~~ → ~~1.5.12~~ → ~~1.5.14~~ → ~~1.5.15~~ → ~~1.5.16~~ → ~~1.5.17~~ → ~~1.5.18~~ → ~~1.5.19~~ → ~~1.5.20~~ → ~~1.5.10~~ → ~~1.5.21~~ → **1.5.22** → 1.5.5 → 1.5.6 → 1.5.7 → 1.5.9 → 1.5.2 → 1.5.3 → 1.5.4 → 1.5.8
+
+---
+
+## 1a. HEUTE (2026-04-16) — WAS WURDE GEMACHT
+
+### Phase 1.5.10 Latenz-Optimierung (komplett deployed, stabil)
+
+- **1.5.10a Typing Indicator**: async Task alle 4s `send_chat_action("typing")`, gestoppt in `finally`. `input/telegram_adapter.py`.
+- **1.5.10b Pre-Classification**: regex `_INSTANT_REPLIES` für Grüße/Danke/Bestätigungen (`^…$`-Anker) umgehen Claude komplett → <100ms Antwort für "hallo", "danke", "ok". `input/telegram_adapter.py`.
+- **1.5.10c SDK-Kompatibilitätstest**: `test_sdk.py` + `test_sdk_v2.py` verifizierten Session-Persistenz von `ClaudeSDKClient` — Claude erinnerte "42" über 4 Nachrichten, Warmstart 3.32s vs Kaltstart 5.46s.
+- **1.5.10d SDK-Integration**: neuer `core/sdk_client.py` mit persistentem Singleton `ClaudeSDKClient` — einmal beim Bot-Start verbinden, alle Messages teilen denselben warmen Subprocess. Feature-Flag `CLAUDE_USE_SDK_CLIENT` (default `True`). Bei jedem SDK-Fehler transparenter Fallback auf den alten `ClaudeSubprocess` (Code unverändert). Zwei Post-Deploy-Fixes: (1) `date.today()`-Vergleich statt Prompt-String-Vergleich — Uhrzeit im Prompt triggerte Reconnect pro Minute. (2) `ResultMessage.result` als Source of Truth — Claude's Denk-Zwischentexte ("Ich lade jetzt das Tool…") ausgefiltert.
+- **1.5.10e ToolSearch-Off**: VERSUCHT mit `env={"ENABLE_TOOL_SEARCH":"false"}`, **REVERTED** wegen vermeintlichem False-Positive bei CalDAV — stellte sich später als 3 unabhängige CalDAV-Bugs heraus (siehe 1.5.21). **Offen für 2. Anlauf** mit explizitem `allowed_tools`-Whitelist statt env-Var.
+
+### Phase 1.5.21 CalDAV Stabilität (komplett deployed, live-verifiziert)
+
+Drei unabhängige Bugs im separaten `caldav-mcp` Repo:
+
+- **Bug A — Starlette /sse Route gab `None` zurück** → `TypeError` bei jedem neuen SSE-Request (604 Exceptions in 2 Tagen Laufzeit). Tolerierbar solange `mcp-remote` im Bot-Container eine einmal etablierte SSE-Session poolte; brach bei jedem `docker compose up --build`. **Fix**: `return Response()` + `debug=False`. Commit `3802c56`.
+- **Bug B — Uncommitted Phase-1.5.15-Extensions**: 420 Zeilen (Nominatim-Geocoding, `update_event`-Tool, ORGANIZER-Feld) lagen seit April 13 als `M` im VPS working-tree ungetrackt — gingen fast verloren beim Debug. Gesichert als eigener Commit `93608f1` bevor weitergearbeitet wurde.
+- **Bug C — keepalive timeout**: Apple iCloud schließt idle TCP-Verbindungen nach ~60-90s; `niquests` Pool wirft dann `ConnectionError("keepalive timeout")` statt transparent zu reconnecten. **Fix**: `@retry_on_stale_connection` Decorator auf 9 Apple-facing Methoden (`list_calendars`, `create_event`, `get_events`, `get_today_events`, `get_week_events`, `get_event_by_uid`, `update_event`, `delete_event`, `search_events`). `_STALE_CONNECTION_MARKERS` walkt Exception-Chain nach `NiquestsConnectionError` oder Substring-Markers. Diskriminiert von 401/404/ValueError (die unverändert durchgereicht werden). `connect()` bewusst NICHT dekoriert (Loop-Risiko). Ein-Schuss-Retry. Commit `86ce5e3`.
+
+**Verifikation**: 95 Unit-Tests grün (86 alt + 9 neu in `tests/test_retry.py`) + 1 E2E-Smoke-Test in `tests/e2e/test_stale_reconnect_e2e.py` mit injiziertem `NiqConnError` (Commit `45af46f`). 2 reale Telegram-Tests (Termine morgen + Wochenübersicht) + 1 Live-Reproduktion zeigt `stale_connection_detected → reconnect (635ms) → retrying → OK 1.44s gesamt`.
+
+### Aktuelle Performance-Zahlen
+
+| Szenario | Vorher | Jetzt |
+|---|---|---|
+| "Danke"/"Hallo" (Pre-Classification) | ~15s | **<0.1s** |
+| Einfache Frage ohne Tool | ~15-30s | **~4s** |
+| Mit einem Tool (Wetter, Things3) | ~20s | **5-10s** |
+| CalDAV Tages-Übersicht (10+ Kalender einzeln) | ~30s | **~30s** (gewünscht, limitiert durch Apple-Round-Trips) |
+| CalDAV Wochen-Übersicht | ~40s | **~40s** |
+| DB Zug-Verbindung | ~20s | **~20s** (HAFAS intrinsisch langsam) |
+| Erste Nachricht nach Bot-Start | ~30s | **~30s** (MCP Cold-Start, eager loading) |
+
+Verbesserung **70-80%** bei normalen Nachrichten. Bei tool-lastigen Calls limitiert durch externe APIs.
+
+### Offene Punkte aus heute
+
+1. **caldav-mcp Remote-Strategie**: Commits `93608f1`, `3802c56`, `86ce5e3`, `45af46f` liegen nur auf VPS (`/home/ali/caldav-mcp/`). Remote ist `madbonez/caldav-mcp` (Upstream-Fork, nicht Majids). **Drei Optionen**:
+   - **A** Eigenes Fork auf `Majid-Ahsan/caldav-mcp`, Remote umstellen, pushen — **empfohlen**
+   - B Als git-Submodule in HiMeS einbinden
+   - C `vendor/caldav-mcp/` in HiMeS einchecken
+   
+   Morgen entscheiden.
+
+2. **`docs/himes-dashboard.html`**: Untracked seit Tagen, Herkunft unklar. Committen oder in `.gitignore`?
+
+3. **Phase 1.5.10e zweiter Anlauf**: ToolSearch-Overhead (5-7s pro Tool-Call) eliminierbar. Jetzt wo CalDAV stabil ist wieder machbar. Diesmal mit explizitem `allowed_tools`-Whitelist statt `ENABLE_TOOL_SEARCH`. Nicht kritisch — kann warten.
+
+---
 
 ### Bekannte Bugs (Phase 1.5.11)
 
@@ -107,6 +159,98 @@ Telegram → Identity → Mega-Agent (Orchestrator)
                             ↓
                     Eval System (Tests)
 ```
+
+---
+
+## 2a. ZUKUNFTS-ARCHITEKTUR — Phase 1.5.22
+
+**Problem-Kontext:**
+Die aktuelle Architektur (Singleton `SDKClient`, alle MCPs eager loaded, anonyme Nachrichten) ist für Single-User (Majid) optimal, blockiert aber Phase-2-Features:
+
+- **Phase 2.5 (Dream Phase)**: Dream-Background-Job konkurriert mit User um den einen Client
+- **Phase 2.6 (Sub-Agents)**: Kein paralleles Spawnen möglich — alles durch den Singleton-Lock serialisiert
+- **Phase 2.9 (Dynamic MCP)**: Alle MCPs immer geladen → bei 20+ MCPs Cold-Start ~30s, auch wenn Nachricht nur einen MCP braucht
+- **Phase 2.10 (Multi-User)**: Client geteilt, Lock serialisiert User, Context/Memory gemischt
+
+**Lösung: 3 rückwärtskompatible Vorbereitungen jetzt stellen, nicht Phase 2 neu bauen.**
+
+### Vorbereitung 1 — `ClaudeBackend` Protocol
+
+Abstraktes Interface einführen, `SDKClient` darauf anpassen. Kein Funktions-Change, nur Shape.
+
+```python
+# core/backends/base.py
+from typing import Protocol, AsyncGenerator
+
+class ClaudeBackend(Protocol):
+    async def start(self) -> None: ...
+    async def shutdown(self) -> None: ...
+    async def process_message(
+        self,
+        user_id: str,           # Multi-User ready (Phase 2.10)
+        session_id: str,        # Pro User/Agent getrennte Sessions
+        user_message: str,
+        system_prompt: str,
+        agent_type: str = "default",  # Sub-Agents (Phase 2.6)
+    ) -> AsyncGenerator[Event, None]: ...
+```
+
+`SingletonSDKBackend` = aktueller `SDKClient` mit diesem Interface (ignoriert `user_id`/`agent_type` erstmal).
+Später: `PoolSDKBackend`, `AgentSDKBackend`.
+
+**Aufwand**: 1-2 Stunden. **Gewinn**: Implementierung austauschbar ohne Orchestrator-Change.
+
+### Vorbereitung 2 — `UserContext` durchreichen
+
+```python
+@dataclass
+class UserContext:
+    user_id: str              # telegram_chat_id als String (stable identifier)
+    display_name: str         # "Majid"
+    telegram_chat_id: int
+    preferences: dict = field(default_factory=dict)
+```
+
+`UserContext` in `telegram_adapter` bauen, durch Orchestrator bis zum Backend reichen. Logik darf erstmal `user_id` ignorieren (Single-User bleibt funktional identisch).
+
+**Aufwand**: 2-3 Stunden. **Gewinn**: Phase 2.10 braucht keine Code-Rewrites — nur Logik umflippen.
+
+### Vorbereitung 3 — MCP-Kategorisierung
+
+`mcp_config.json` strukturieren nach Kategorien, auch wenn heute alle immer geladen werden:
+
+```json
+{
+  "categories": {
+    "core":     ["time", "himes-tools"],
+    "personal": ["caldav", "things3"],
+    "transport":["deutsche-bahn"],
+    "home":     ["weather", "home-assistant"],
+    "medical":  []
+  },
+  "mcpServers": { /* unverändert */ }
+}
+```
+
+Settings-Flag `MCP_LAZY_LOADING: bool = False` hinzufügen (default = alle laden wie bisher). Wenn in Phase 2.9 Lazy-Loading aktiviert wird, entscheidet die Nachricht welche Kategorien aktiv sind.
+
+**Aufwand**: 1 Stunde. **Gewinn**: Skalierung auf 20+ MCPs ohne Cold-Start-Explosion.
+
+### Vorbereitung 4 — Deployment-Standard dokumentieren
+
+Aktuell gemischt: docker-compose (HiMeS, db-rest), systemd (jarvis-caldav), npm (mcp-remote), Caddy. Für Phase 2 werden mehr Services dazukommen (Cognee/Qdrant, Scheduler für Dream Phase, Whisper-Service, Skill-Repo).
+
+Entscheidung treffen und in einem ADR dokumentieren:
+
+- **Option A** — Alles nach docker-compose migrieren (auch jarvis-caldav containerisieren)
+- **Option B** — Bleiben wie aktuell, aber klare Trennung: "docker-compose für stateful Services, systemd für langlaufende Prozesse, npm für Node-basierte"
+- **Option C** — Kubernetes (overkill für Single-Host, aber zukunftssicher)
+
+**Empfehlung A**. Ein einziges `docker-compose.yml`, alle Services, gemeinsame Logs, gemeinsames Netzwerk. `jarvis-caldav` wird zu einem Container.
+
+**Aufwand**: ADR schreiben = 30 Min. Migration `jarvis-caldav` → Docker = 2-3 Stunden (optional, kann auch später).
+
+**Wichtig**: Diese 4 Vorbereitungen machen **nichts langsamer, nichts kaputt, keine Feature-Änderung**. Sie sind Investment in die Zukunft. Phase 2.1-2.5 (Cognee, Dream, Audio) können ohne sie gebaut werden — aber ab Phase 2.6 (Sub-Agents) sind sie nötig.
 
 ---
 
@@ -472,6 +616,33 @@ Problem: 10-20s pro Request (CLI Kaltstart + MCP Warmup bei jedem Request).
 4. Status in docs/MASTER-REFERENCE.md updaten
 
 Ziel: 10-20s → 4-9s. Regeln: Async, Logging, Fallback bei Crash.
+```
+
+### Phase 1.5.22 — Zukunfts-Architektur vorbereiten
+```
+Lies docs/MASTER-REFERENCE.md. Du bist Lead Developer für HiMeS.
+Task: Phase 1.5.22 — Zukunfts-Architektur vorbereiten (rückwärtskompatibel).
+
+Ziel: Weichen für Phase 2 stellen ohne aktuelle Funktion zu ändern.
+Siehe Sektion 2a für Kontext und Begründung.
+
+Reihenfolge:
+1. ClaudeBackend Protocol einführen (core/backends/base.py), SDKClient als 
+   SingletonSDKBackend refactoren. Interface, keine Logik-Änderung.
+2. UserContext dataclass einführen und durch Telegram→Orchestrator→Backend 
+   reichen. Logik ignoriert user_id erstmal.
+3. mcp_config.json kategorisieren, MCP_LAZY_LOADING Setting einführen (default=False).
+4. Deployment-ADR schreiben: Option A (alles docker-compose) empfohlen.
+   jarvis-caldav Container-Migration ist optional, separate Task.
+
+WICHTIG:
+- Keine Verhaltensänderung für User. Telegram-Tests müssen exakt gleich funktionieren.
+- Feature-Flags wo sinnvoll (z.B. MCP_LAZY_LOADING=False default)
+- Tests grün halten (pytest)
+- Jeder Teilschritt eigener Commit
+
+Regeln: Async, Typen-Hints, structlog, settings.py, .env. Status in 
+docs/MASTER-REFERENCE.md updaten.
 ```
 
 ### Phase 1.5.2 — Message Splitting
