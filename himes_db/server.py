@@ -583,7 +583,7 @@ async def db_search_connections(
     transfers: int | None = None,
     regional_only: bool = False,
 ) -> str:
-    """Search connections A->B. Shows 1 earlier + 3 later connections around the requested time."""
+    """Search connections A->B. Shows 1 earlier + 4 later connections around the requested time."""
     try:
         from_result = await rest_client.resolve_location(from_station)
         if not from_result.get("ok"):
@@ -596,47 +596,69 @@ async def db_search_connections(
         to_loc = to_result["data"]
 
         requested_dt: datetime | None = None
-        earlier_departure: str | None = None
 
-        # Parse the requested departure time and calculate 45min earlier
+        # Parse the requested departure time
         if departure and not arrival:
             requested_dt = _parse_departure(departure)
             if requested_dt:
-                earlier_dt = requested_dt - timedelta(minutes=45)
-                earlier_departure = earlier_dt.isoformat()
-                # Also update departure to proper ISO for the API
                 departure = requested_dt.isoformat()
 
-        if earlier_departure and requested_dt:
-            # Fetch from 45 min earlier with extra results to find 1 before + 4 after
-            journey_result = await rest_client.journeys(
+        if requested_dt:
+            # Smart split via TWO queries:
+            # - Query 1: small backward window for 1 "before" journey
+            # - Query 2: at requested time for 4 "after" journeys
+            # Separate queries avoid the "HAFAS returns 10 locals all before
+            # requested_dt" bug that left the 'after' bucket empty.
+
+            # "After" query: from the requested time forward
+            after_result = await rest_client.journeys(
                 from_loc, to_loc,
-                departure=earlier_departure,
-                results=10,
+                departure=requested_dt.isoformat(),
+                results=5,
                 transfers=transfers,
                 regional_only=regional_only,
             )
-            if not journey_result.get("ok"):
-                return _fmt_error(journey_result, context="journeys:smart_split")
-            data = journey_result["data"]
-            all_journeys = data.get("journeys", [])
+            if not after_result.get("ok"):
+                return _fmt_error(after_result, context="journeys:after")
+            after_journeys = after_result["data"].get("journeys", [])
+            # Strictly filter: only journeys at/after requested time
+            after = [
+                j for j in after_journeys
+                if (_get_journey_dep_dt(j) or requested_dt) >= requested_dt
+            ][:4]
 
-            # Split into before/after requested time
-            before: list[dict] = []
-            after: list[dict] = []
-            for j in all_journeys:
-                jdt = _get_journey_dep_dt(j)
-                if jdt and jdt < requested_dt:
-                    before.append(j)
-                else:
-                    after.append(j)
+            # "Before" query: from 20 min earlier, limited results
+            earlier_dt = requested_dt - timedelta(minutes=20)
+            before_result = await rest_client.journeys(
+                from_loc, to_loc,
+                departure=earlier_dt.isoformat(),
+                results=4,
+                transfers=transfers,
+                regional_only=regional_only,
+            )
+            if before_result.get("ok"):
+                before_journeys = before_result["data"].get("journeys", [])
+                before = [
+                    j for j in before_journeys
+                    if (_get_journey_dep_dt(j) or requested_dt) < requested_dt
+                ]
+                # Dedupe: only keep 'before' journeys not already in 'after'
+                after_refresh = {j.get("refreshToken") for j in after if j.get("refreshToken")}
+                before = [j for j in before if j.get("refreshToken") not in after_refresh]
+            else:
+                # If before query fails, still show after journeys — don't
+                # fail the whole tool call
+                before = []
+                log.warning(
+                    "tool.before_query_failed",
+                    error=before_result.get("error"),
+                    context="search_connections",
+                )
 
-            # Take last 1 before + first 4 after
             selected_before = before[-1:] if before else []
-            selected_after = after[:4]
-            journeys = selected_before + selected_after
+            journeys = selected_before + after
         else:
-            # Normal query (no smart split)
+            # Normal query (no time hint → let HAFAS pick)
             journey_result = await rest_client.journeys(
                 from_loc, to_loc,
                 departure=departure,
@@ -649,7 +671,7 @@ async def db_search_connections(
                 return _fmt_error(journey_result, context="journeys:direct")
             data = journey_result["data"]
             journeys = data.get("journeys", [])[:5]
-            requested_dt = None  # No split marker
+            requested_dt = None
 
         if not journeys:
             return f"Keine Verbindungen gefunden: {from_station} -> {to_station}"
@@ -1208,7 +1230,7 @@ def _format_live_status(trip: dict, dep: dict, line: str, station: str) -> str:
 
     # Build output
     lines: list[str] = [f"🚆 LIVE-Status: {line_name} → {destination}"]
-    lines.append(f"📍 Snapshot ab {station}")
+    lines.append(f"📍 Abfahrtsstation: {station}")
     lines.append("")
 
     # Times
@@ -1264,7 +1286,7 @@ def _format_live_from_departure(dep: dict, line: str, station: str) -> str:
     cancelled = dep.get("cancelled", False)
 
     lines = [f"🚆 {line_name} → {direction}"]
-    lines.append(f"📍 ab {station} (Trip-Details nicht abrufbar, nur Abfahrts-Snapshot)")
+    lines.append(f"📍 Abfahrtsstation: {station} (nur Abfahrtsdaten, volle Trip-Info nicht abrufbar)")
     lines.append("")
     if cancelled:
         lines.append(f"❌ AUSFALL (planmäßig {_format_time(planned_when)})")
