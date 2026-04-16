@@ -927,7 +927,206 @@ async def db_pendler_check(
         return f"Fehler beim Pendler-Check: {e}"
 
 
-# ── Tool 8: db_nrw_stoerungen (zuginfo.nrw) ──────────────────────────
+# ── Tool 8: db_train_live_status ─────────────────────────────────────
+
+@mcp.tool(
+    description="Zeigt den LIVE-Status eines bestimmten Zuges (Verspaetung, aktuelles Gleis inkl. "
+    "Gleisaenderungen, naechster Halt). Nutze dies bei Fragen wie 'wo ist die RE1', "
+    "'Gleis der S1 nochmal pruefen', 'aktuelle Verspaetung U18'. "
+    "line: Zug-Linie (z.B. 'RE1', 'S1', 'U18'). "
+    "station: Station fuer den Live-Snapshot (default 'Mülheim Hbf'). "
+    "Greift auf /trips/:id zu — die einzige Datenquelle fuer Live-Position und Live-Gleis."
+)
+async def db_train_live_status(
+    line: str,
+    station: str = "Mülheim Hbf",
+    duration: int = 120,
+) -> str:
+    """Live status for a specific train line at a station.
+
+    Flow: resolve station → departures filtered by line → pick first match →
+    /trips/:id for full live details (delay, current platform, next stop).
+    """
+    try:
+        # Resolve station
+        try:
+            station_id = await rest_client.resolve_station(station)
+        except ValueError as ve:
+            return f"⚠️ {ve}"
+
+        # Find departures matching the line
+        dep_result = await rest_client.departures(
+            station_id,
+            duration=duration,
+            results=20,
+            line_name=line,
+            include_local=True,
+        )
+        if not dep_result.get("ok"):
+            return _fmt_error(dep_result, context=f"live_status:departures:{line}")
+        deps = dep_result["data"]
+
+        # Filter strictly by line name (line_name param may be fuzzy)
+        matching = [d for d in deps
+                    if d.get("line", {}).get("name", "").replace(" ", "").lower() ==
+                       line.replace(" ", "").lower()]
+        if not matching:
+            return (
+                f"⚠️ Keine aktuellen Abfahrten der Linie {line} an {station} in den "
+                f"nächsten {duration} Minuten gefunden. Vielleicht läuft sie hier nicht "
+                f"oder ist komplett ausgefallen."
+            )
+
+        # Pick the next departure
+        next_dep = matching[0]
+        trip_id = next_dep.get("tripId", "")
+        if not trip_id:
+            return f"⚠️ Keine Trip-ID für {line} an {station} verfügbar."
+
+        # Fetch full live trip details
+        trip_result = await rest_client.trip(trip_id)
+        if not trip_result.get("ok"):
+            # Fall back to just the departure info we have
+            return _format_live_from_departure(next_dep, line, station)
+        trip_data = trip_result["data"]
+        trip = trip_data.get("trip", trip_data)
+
+        return _format_live_status(trip, next_dep, line, station)
+
+    except Exception as e:
+        log.exception("tool.live_status_error")
+        return f"⚠️ Fehler beim Live-Status für {line}: {e}"
+
+
+def _format_live_status(trip: dict, dep: dict, line: str, station: str) -> str:
+    """Format the live-status output for a specific train."""
+    line_name = _get_line_name(trip) or line
+    direction = _get_direction(trip) or _get_direction(dep)
+    origin = (trip.get("origin") or {}).get("name", "?")
+    destination = (trip.get("destination") or {}).get("name", direction)
+
+    # Current vs planned time at our station
+    planned_when = dep.get("plannedWhen")
+    actual_when = trip.get("when") or trip.get("departure") or dep.get("when") or planned_when
+
+    # Platform — prefer trip-level (more live)
+    planned_platform = (trip.get("plannedPlatform")
+                        or dep.get("plannedPlatform")
+                        or "")
+    actual_platform = (trip.get("platform")
+                       or dep.get("platform")
+                       or planned_platform)
+    platform_changed = bool(
+        planned_platform and actual_platform and planned_platform != actual_platform
+    )
+
+    # Delay (in seconds → minutes)
+    delay_sec = trip.get("delay") or dep.get("delay") or 0
+    delay_min = delay_sec // 60 if delay_sec else 0
+
+    cancelled = trip.get("cancelled") or dep.get("cancelled") or False
+
+    # Current location (if train is moving)
+    cur_loc = trip.get("currentLocation", {})
+    cur_lat = cur_loc.get("latitude") if isinstance(cur_loc, dict) else None
+    cur_lon = cur_loc.get("longitude") if isinstance(cur_loc, dict) else None
+
+    # Next stopover
+    next_stop_info = ""
+    stopovers = trip.get("stopovers", [])
+    if stopovers:
+        now = datetime.now(TZ_BERLIN)
+        for sov in stopovers:
+            sov_arr = sov.get("arrival") or sov.get("plannedArrival")
+            if not sov_arr:
+                continue
+            try:
+                sov_dt = datetime.fromisoformat(sov_arr)
+                if sov_dt.astimezone(TZ_BERLIN) > now:
+                    sov_name = sov.get("stop", {}).get("name", "?")
+                    sov_time = _format_time(sov_arr)
+                    sov_delay = (sov.get("arrivalDelay") or 0) // 60
+                    delay_str = f" (+{sov_delay}min)" if sov_delay > 0 else ""
+                    next_stop_info = f"{sov_name} — an {sov_time}{delay_str}"
+                    break
+            except (ValueError, TypeError):
+                continue
+
+    # Build output
+    lines: list[str] = [f"🚆 LIVE-Status: {line_name} → {destination}"]
+    lines.append(f"📍 Snapshot ab {station}")
+    lines.append("")
+
+    # Times
+    planned_str = _format_time(planned_when)
+    actual_str = _format_time(actual_when)
+    if cancelled:
+        lines.append(f"❌ AUSFALL (planmäßig {planned_str})")
+    elif delay_min >= 60:
+        lines.append(f"⚠️ +{delay_min // 60}h{delay_min % 60:02d}min Verspätung "
+                     f"(planmäßig {planned_str} → jetzt {actual_str})")
+    elif delay_min > 0:
+        lines.append(f"⚠️ +{delay_min} min Verspätung "
+                     f"(planmäßig {planned_str} → jetzt {actual_str})")
+    elif delay_min < 0:
+        lines.append(f"✅ {delay_min} min früher (planmäßig {planned_str})")
+    else:
+        lines.append(f"✅ Pünktlich (planmäßig {planned_str})")
+
+    # Platform
+    if cancelled:
+        pass  # no platform info for cancelled trains
+    elif platform_changed:
+        lines.append(f"🔀 Gleisänderung: {planned_platform} → **{actual_platform}**")
+    elif actual_platform:
+        lines.append(f"🛤 Gleis {actual_platform}")
+    else:
+        lines.append("🛤 Gleis noch nicht bekannt")
+
+    # Next stop
+    if next_stop_info:
+        lines.append(f"➡️  Nächster Halt: {next_stop_info}")
+
+    # Current position (if available)
+    if cur_lat and cur_lon:
+        lines.append(f"🗺 Position: {cur_lat:.4f}, {cur_lon:.4f}")
+
+    return "\n".join(lines)
+
+
+def _format_live_from_departure(dep: dict, line: str, station: str) -> str:
+    """Fallback formatter if /trips/:id fails — uses only departure data."""
+    line_name = _get_line_name(dep) or line
+    direction = _get_direction(dep)
+    planned_when = dep.get("plannedWhen")
+    actual_when = dep.get("when") or planned_when
+    planned_platform = dep.get("plannedPlatform", "") or ""
+    actual_platform = dep.get("platform", "") or planned_platform
+    platform_changed = bool(
+        planned_platform and actual_platform and planned_platform != actual_platform
+    )
+    delay_sec = dep.get("delay") or 0
+    delay_min = delay_sec // 60
+    cancelled = dep.get("cancelled", False)
+
+    lines = [f"🚆 {line_name} → {direction}"]
+    lines.append(f"📍 ab {station} (Trip-Details nicht abrufbar, nur Abfahrts-Snapshot)")
+    lines.append("")
+    if cancelled:
+        lines.append(f"❌ AUSFALL (planmäßig {_format_time(planned_when)})")
+    elif delay_min > 0:
+        lines.append(f"⚠️ +{delay_min} min Verspätung "
+                     f"(planmäßig {_format_time(planned_when)} → jetzt {_format_time(actual_when)})")
+    else:
+        lines.append(f"✅ Pünktlich ({_format_time(actual_when)})")
+    if platform_changed:
+        lines.append(f"🔀 Gleisänderung: {planned_platform} → **{actual_platform}**")
+    elif actual_platform:
+        lines.append(f"🛤 Gleis {actual_platform}")
+    return "\n".join(lines)
+
+
+# ── Tool 9: db_nrw_stoerungen (zuginfo.nrw) ──────────────────────────
 
 @mcp.tool(
     description="Zeigt aktuelle Stoerungen, Ausfaelle und Bauarbeiten im NRW-Nahverkehr (S-Bahn, RE, RB, U-Bahn, Tram). Daten von zuginfo.nrw."
