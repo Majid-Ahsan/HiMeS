@@ -73,6 +73,47 @@ class HallucinationGuard:
         log.info("guard.domain_registered", domain=name,
                  patterns=len(compiled), prefixes=tool_prefixes)
 
+    # Negation phrases — if present within ~100 chars of a pattern match,
+    # the text is a refusal/recommendation, not a factual claim → no trigger
+    _NEGATION_PHRASES = (
+        "kein live-tracking",
+        "kein tracking",
+        "kein tool",
+        "keine tool",
+        "nicht verfügbar",
+        "nicht verfuegbar",
+        "kann ich nicht",
+        "kann ich dir nicht",
+        "habe ich nicht",
+        "habe ich kein",
+        "empfehle ich",
+        "empfehle dir",
+        "nutze die",
+        "schau in die",
+        "db navigator",
+        "vrr-app",
+        "vrr.de",
+        "bahn.de",
+        "dafür habe ich kein",
+        "dafuer habe ich kein",
+        "steht mir nicht zur verfügung",
+        "ohne live-verifikation",  # our own disclaimer — avoid re-triggering
+    )
+
+    @classmethod
+    def _is_near_negation(cls, text: str, match_start: int, match_end: int,
+                          window: int = 150) -> bool:
+        """Check if the pattern match is in a refusal/recommendation context.
+
+        Looks at a window of chars around the match. If any negation phrase
+        appears → the text is NOT claiming data, just referring to it.
+        """
+        lower = text.lower()
+        lo = max(0, match_start - window)
+        hi = min(len(text), match_end + window)
+        context = lower[lo:hi]
+        return any(phrase in context for phrase in cls._NEGATION_PHRASES)
+
     def check(self, text: str, tools_called: list[str]) -> tuple[bool, str]:
         """Check a response against all registered domains.
 
@@ -80,6 +121,9 @@ class HallucinationGuard:
             (is_suspect, appended_disclaimers) — if no issue, returns (False, "").
             If suspect, returns (True, disclaimer_text_to_append).
             When multiple domains flag, disclaimers are joined with newlines.
+
+        Negation-aware: pattern matches in refusal context ("kein Tool",
+        "empfehle die App", etc.) are NOT counted as claims.
         """
         if not text or not self._domains:
             return False, ""
@@ -91,14 +135,23 @@ class HallucinationGuard:
             claimed = False
             matched_patterns: list[str] = []
             for pat in domain.patterns:
-                m = pat.search(text)
-                if m:
+                for m in pat.finditer(text):
+                    # Skip matches in refusal/recommendation context
+                    if self._is_near_negation(text, m.start(), m.end()):
+                        continue
                     claimed = True
                     matched_patterns.append(m.group(0))
                     if len(matched_patterns) >= 3:
                         break
+                if len(matched_patterns) >= 3:
+                    break
 
             if not claimed:
+                log.debug(
+                    "guard.no_claim",
+                    domain=domain.name,
+                    reason="all_matches_in_negation_or_no_match",
+                )
                 continue
 
             # Was any tool from this domain called?

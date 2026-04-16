@@ -220,16 +220,21 @@ def _is_remark_relevant(
     journey_start: datetime | None,
     journey_end: datetime | None,
     journey_stations: set[str],
+    final_destination: str = "",
     tolerance_min: int = 30,
 ) -> bool:
     """Check if a remark is relevant to the shown journey.
 
     A remark is relevant if:
     - Its validity window overlaps with the journey (± tolerance_min minutes), AND
-    - It mentions at least one station on the journey route (if route info given)
+    - It mentions at least one station on the journey route, AND
+    - It is NOT exclusively about a section downstream of the user's final destination
+      (e.g. "zwischen Dortmund und Hamm" is downstream for Mülheim→Dortmund).
 
     Unknown windows/routes default to "relevant" to avoid dropping real issues.
     """
+    import re as _re
+
     # Time window check
     valid_from = remark.get("validFrom") or remark.get("startAt") or remark.get("modified")
     valid_to = remark.get("validUntil") or remark.get("endAt")
@@ -238,7 +243,7 @@ def _is_remark_relevant(
         try:
             vf = datetime.fromisoformat(valid_from)
             if vf.astimezone(TZ_BERLIN) > journey_end.astimezone(TZ_BERLIN) + timedelta(minutes=tolerance_min):
-                return False  # Remark starts after journey ends
+                return False
         except (ValueError, TypeError):
             pass
 
@@ -246,36 +251,62 @@ def _is_remark_relevant(
         try:
             vt = datetime.fromisoformat(valid_to)
             if vt.astimezone(TZ_BERLIN) < journey_start.astimezone(TZ_BERLIN) - timedelta(minutes=tolerance_min):
-                return False  # Remark ended before journey starts
+                return False
         except (ValueError, TypeError):
             pass
 
-    # Route/location check — only if we have station context
+    orig_text = remark.get("text", "") + " " + remark.get("summary", "")
+    text = orig_text.lower()
+
+    # ── Downstream-segment filter ──
+    # Patterns: "zwischen X und Y" / "between X and Y" — if X OR Y equals the
+    # final destination and the OTHER is NOT in journey_stations, the remark is
+    # about a section after the user gets off → drop.
+    if final_destination:
+        dest_normalised = _strip_station_name(final_destination).lower()
+        # Build set of ROUTE stations (excluding final destination)
+        route_stations = {
+            _strip_station_name(s).lower()
+            for s in journey_stations
+            if _strip_station_name(s).lower() != dest_normalised
+        }
+        # Match "zwischen X und Y" / "from X to Y" patterns
+        seg_patterns = [
+            _re.compile(r'zwischen\s+([A-ZÄÖÜ][\wäöüß(). -]{2,40}?)\s+und\s+([A-ZÄÖÜ][\wäöüß(). -]{2,40}?)(?:[.,!?;]|\s+(?:verzögert|beeinflusst|betrifft|verz[oe]gert))', _re.IGNORECASE),
+            _re.compile(r'between\s+([A-Z][\w .-]{2,40}?)\s+and\s+([A-Z][\w .-]{2,40}?)(?:[.,!?;]|\s)', _re.IGNORECASE),
+        ]
+        for pat in seg_patterns:
+            for m in pat.finditer(orig_text):
+                a = _strip_station_name(m.group(1)).lower().strip()
+                b = _strip_station_name(m.group(2)).lower().strip()
+                a_is_dest = dest_normalised in a or a in dest_normalised
+                b_is_dest = dest_normalised in b or b in dest_normalised
+                a_on_route = any(rs in a or a in rs for rs in route_stations)
+                b_on_route = any(rs in b or b in rs for rs in route_stations)
+                # Downstream: one endpoint IS the destination, the other is NOT on the route
+                if (a_is_dest and not b_on_route and not b_is_dest) or \
+                   (b_is_dest and not a_on_route and not a_is_dest):
+                    return False  # downstream — drop
+
+    # ── Route/location check ──
     if journey_stations:
-        text = (remark.get("text", "") + " " + remark.get("summary", "")).lower()
         if not text.strip():
-            return True  # No text to check — keep
-        # If the remark mentions ANY station from the journey, it's relevant
+            return True
         for station in journey_stations:
             station_clean = _strip_station_name(station).lower()
             if station_clean and len(station_clean) >= 4 and station_clean in text:
                 return True
         # If the remark mentions other specific station names that are NOT on
         # our route → likely not relevant (e.g. "Aachen-Stolberg" for Mülheim-Dortmund)
-        # We detect this by checking for city keywords
-        import re as _re
-        # Find capitalised words in original-case text that look like station names
-        orig_text = remark.get("text", "") + " " + remark.get("summary", "")
         city_candidates = _re.findall(
             r'\b[A-ZÄÖÜ][a-zäöüß]{3,}(?:[-\s][A-ZÄÖÜ][a-zäöüß]{2,})?\b',
             orig_text,
         )
         if city_candidates:
-            # If we found city names but none match our journey → filter out
             return False
-        return True  # No city hints either way → keep
+        return True
 
-    return True  # No station context → keep
+    return True
 
 
 def _strip_station_name(name: str) -> str:
@@ -424,7 +455,7 @@ def _format_journey_row(journey: dict, is_earlier: bool = False) -> str:
     else:
         status_icon = "✅"
 
-    # Remarks — filter by relevance (time window overlap + station matching)
+    # Remarks — filter by relevance (time window + stations + downstream filter)
     journey_start = _get_journey_dep_dt(journey)
     last_arr_str = last_leg.get("arrival") or last_leg.get("plannedArrival")
     journey_end: datetime | None = None
@@ -434,6 +465,8 @@ def _format_journey_row(journey: dict, is_earlier: bool = False) -> str:
         except (ValueError, TypeError):
             journey_end = None
     journey_stations = _collect_journey_stations(journey)
+    # Final destination of the user's journey = last leg's destination
+    final_destination = (last_leg.get("destination") or {}).get("name", "")
 
     remark_line = ""
     for leg in legs:
@@ -444,8 +477,11 @@ def _format_journey_row(journey: dict, is_earlier: bool = False) -> str:
                 continue
             if rtype not in ("warning", "status"):
                 continue
-            # Relevance filter: time window + station match
-            if not _is_remark_relevant(r, journey_start, journey_end, journey_stations):
+            # Relevance filter: time window + station match + downstream filter
+            if not _is_remark_relevant(
+                r, journey_start, journey_end, journey_stations,
+                final_destination=final_destination,
+            ):
                 continue
             remark_line = f"\n   ⚠️ {_smart_truncate(text)}"
             break

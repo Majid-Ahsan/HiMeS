@@ -130,6 +130,70 @@ class TestRemarkRelevance:
             remark, jstart, jend, {"Mülheim Hbf"}
         ) is True
 
+    # ── Downstream-segment filter (DB-FIX-5c) ──
+
+    def test_downstream_segment_dropped(self):
+        """Real-world: 'zwischen Dortmund Hbf und Hamm(Westf)Hbf' for
+        Mülheim→Dortmund journey → Hamm is downstream, drop."""
+        jstart = datetime(2026, 4, 17, 6, 31, tzinfo=TZ)
+        jend = datetime(2026, 4, 17, 7, 7, tzinfo=TZ)
+        stations = {"Mülheim(Ruhr)Hbf", "Essen Hbf", "Bochum Hbf", "Dortmund Hbf"}
+        remark = {
+            "type": "warning",
+            "text": "Eine Reparatur an der Strecke zwischen Dortmund Hbf und "
+                    "Hamm(Westf)Hbf verzögert den Bahnverkehr.",
+        }
+        assert srv._is_remark_relevant(
+            remark, jstart, jend, stations,
+            final_destination="Dortmund Hbf",
+        ) is False
+
+    def test_upstream_segment_kept(self):
+        """Segment on the route → keep."""
+        jstart = datetime(2026, 4, 17, 6, 31, tzinfo=TZ)
+        jend = datetime(2026, 4, 17, 7, 7, tzinfo=TZ)
+        stations = {"Mülheim(Ruhr)Hbf", "Essen Hbf", "Bochum Hbf", "Dortmund Hbf"}
+        remark = {
+            "type": "warning",
+            "text": "Störung zwischen Essen Hbf und Bochum Hbf.",
+        }
+        assert srv._is_remark_relevant(
+            remark, jstart, jend, stations,
+            final_destination="Dortmund Hbf",
+        ) is True
+
+    def test_segment_starting_from_destination_dropped_even_without_und(self):
+        """'Zwischen' pattern is the trigger. Other segment wordings may slip
+        through but that's acceptable — false negatives > false positives."""
+        jstart = datetime(2026, 4, 17, 6, 31, tzinfo=TZ)
+        jend = datetime(2026, 4, 17, 7, 7, tzinfo=TZ)
+        stations = {"Mülheim Hbf", "Dortmund Hbf"}
+        # Downstream pattern
+        remark = {
+            "type": "warning",
+            "text": "zwischen Dortmund Hbf und Hamm, beeinflusst den Bahnverkehr.",
+        }
+        assert srv._is_remark_relevant(
+            remark, jstart, jend, stations,
+            final_destination="Dortmund Hbf",
+        ) is False
+
+    def test_no_final_destination_provided_still_works(self):
+        """Without final_destination, downstream filter is bypassed — fallback to
+        station-based filter (existing behaviour)."""
+        jstart = datetime(2026, 4, 17, 6, 31, tzinfo=TZ)
+        jend = datetime(2026, 4, 17, 7, 7, tzinfo=TZ)
+        stations = {"Mülheim Hbf", "Dortmund Hbf"}
+        remark = {
+            "type": "warning",
+            "text": "Störung zwischen Dortmund Hbf und Hamm.",
+        }
+        # No final_destination → Dortmund is in stations → passes station filter
+        # (existing behaviour preserved)
+        assert srv._is_remark_relevant(
+            remark, jstart, jend, stations,
+        ) is True
+
 
 # ─── Station name normalisation ────────────────────────────────────
 

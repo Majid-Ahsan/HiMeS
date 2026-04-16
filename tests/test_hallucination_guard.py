@@ -168,3 +168,74 @@ class TestHallucinationGuard:
         if "U-Boot" in neutral or "Section" in neutral or "Fenster" in neutral:
             # These SHOULD pass — no DB claim
             assert suspect is False, f"False positive: {neutral}"
+
+    # ── Negation-awareness tests (DB-FIX-5a) ──
+
+    def test_refusal_text_with_train_mention_no_trigger(self):
+        """Real-world: Claude says 'kein Live-Tool für U18' — should NOT trigger."""
+        guard = build_default_guard()
+        text = (
+            "Ich habe gerade kein Live-Tracking-Tool für die U18 verfügbar. "
+            "Für die aktuelle Position der U-Bahn empfehle ich dir:\n"
+            "- VRR-App\n- DB Navigator App\n- vrr.de"
+        )
+        suspect, disc = guard.check(text, [])
+        assert suspect is False, f"Should not trigger on refusal text. Disclaimer: {disc}"
+
+    def test_refusal_with_multiple_train_names_no_trigger(self):
+        guard = build_default_guard()
+        text = "Dafür habe ich kein Tool — für RE1 oder S1 nutze die DB Navigator App."
+        suspect, disc = guard.check(text, [])
+        assert suspect is False
+
+    def test_recommend_app_with_train_no_trigger(self):
+        guard = build_default_guard()
+        text = "Die U18 Position empfehle ich dir über die VRR-App zu prüfen."
+        suspect, disc = guard.check(text, [])
+        assert suspect is False
+
+    def test_own_disclaimer_not_retriggered(self):
+        """Our own disclaimer contains 'Zeiten, Gleise, Verspätungen' — must not retrigger."""
+        guard = build_default_guard()
+        text = (
+            "Die RE1 fährt um 07:35.\n\n"
+            "⚠️ Ohne Live-Verifikation — die oben genannten Zugdaten "
+            "(Zeiten, Gleise, Verspätungen) konnten nicht über die DB-API "
+            "bestätigt werden."
+        )
+        # This SHOULD still trigger on the "RE1 um 07:35" — but not double-trigger
+        # because of disclaimer text alone
+        # First clean case — only disclaimer text:
+        disclaimer_only = (
+            "⚠️ Ohne Live-Verifikation — die Gleise und Verspätungen konnten "
+            "nicht bestätigt werden."
+        )
+        suspect, disc = guard.check(disclaimer_only, [])
+        assert suspect is False, (
+            f"Disclaimer text alone shouldn't retrigger. Got disclaimer: {disc}"
+        )
+
+    def test_real_claim_still_triggers(self):
+        """Sanity check: real hallucinated claim (no refusal context) still triggers."""
+        guard = build_default_guard()
+        text = "Die RE1 fährt um 16:47 von Gleis 16 ab."
+        suspect, disc = guard.check(text, [])
+        assert suspect is True
+
+    def test_mixed_refusal_then_claim_triggers(self):
+        """If text has BOTH refusal AND an isolated claim elsewhere, should trigger.
+
+        Edge case: Claude says 'ich habe kein Tool' but then 'die S1 um 08:15'
+        in unrelated sentence. The S1 claim is far from negation → triggers.
+        """
+        guard = build_default_guard()
+        # Lots of unrelated filler to ensure claim is far from negation phrases
+        filler = " Irgendein langer Text ohne Bezug. " * 15
+        text = (
+            "Für die RE1 habe ich kein Tracking-Tool."
+            + filler
+            + "Die S1 fährt um 08:15 von Gleis 3."
+        )
+        suspect, disc = guard.check(text, [])
+        # The S1 claim is far from any negation → should trigger
+        assert suspect is True
