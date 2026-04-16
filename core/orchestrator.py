@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from config.settings import settings
 from core.claude_subprocess import ClaudeSubprocess, ClaudeErrorType
 from core.hallucination_guard import build_default_guard
+from core.sdk_client import SDKClient
 from input.telegram_adapter import TelegramAdapter
 
 logger = structlog.get_logger(__name__)
@@ -34,6 +35,9 @@ def _configure_logging() -> None:
 class Orchestrator:
     def __init__(self) -> None:
         self._claude = ClaudeSubprocess()
+        # Persistenter SDK-Client (Phase 1.5.10d). System-Prompt wird lazy
+        # gebaut — Datum/Uhrzeit fließen bei jedem Aufruf ein.
+        self._sdk = SDKClient(build_system_prompt=self._claude._build_system_prompt)
         self._telegram = TelegramAdapter(on_message=self._handle_message)
         self._health_app = self._build_health_app()
         self._shutdown_event = asyncio.Event()
@@ -160,8 +164,35 @@ class Orchestrator:
                     except OSError:
                         pass
 
+    async def _send_to_claude(self, user_id: int, text: str):
+        """Dispatch: SDK-Client (wenn aktiviert + gesund) oder Subprocess-Fallback."""
+        if settings.claude.use_sdk_client:
+            try:
+                response = await self._sdk.send(user_id, text)
+                # Bei Crash/Start-Fehler des SDK-Clients transparent auf Subprocess fallback.
+                if (
+                    not response.text
+                    and response.error_type == ClaudeErrorType.SUBPROCESS_CRASH
+                ):
+                    logger.warning(
+                        "orchestrator.sdk_fallback",
+                        user_id=user_id,
+                        errors=response.errors,
+                    )
+                    return await self._claude.send(user_id, text)
+                return response
+            except Exception as exc:  # Defensive Sicherung
+                logger.warning(
+                    "orchestrator.sdk_fallback_on_exception",
+                    user_id=user_id,
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                )
+                return await self._claude.send(user_id, text)
+        return await self._claude.send(user_id, text)
+
     async def _process_claude(self, user_id: int, text: str) -> str:
-        response = await self._claude.send(user_id, text)
+        response = await self._send_to_claude(user_id, text)
 
         # ── Differentiated error handling with auto-retry ──
         if response.errors and not response.text:
@@ -307,6 +338,19 @@ class Orchestrator:
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, self._shutdown_event.set)
 
+        # SDK-Client vorwärmen: MCP-Server starten einmalig, nicht pro Nachricht.
+        # Bei Fehler nur warnen — der Orchestrator fällt automatisch auf den
+        # Subprocess-Pfad zurück.
+        if settings.claude.use_sdk_client:
+            try:
+                await self._sdk.start()
+            except Exception as exc:
+                logger.warning(
+                    "orchestrator.sdk_start_failed",
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                )
+
         # Start Telegram + Health server
         await self._telegram.start()
         health_task = asyncio.create_task(self._run_health_server())
@@ -318,6 +362,10 @@ class Orchestrator:
 
         logger.info("orchestrator.shutting_down")
         await self._telegram.stop()
+        try:
+            await self._sdk.shutdown()
+        except Exception as exc:
+            logger.warning("orchestrator.sdk_shutdown_error", error=str(exc))
         health_task.cancel()
         try:
             await health_task

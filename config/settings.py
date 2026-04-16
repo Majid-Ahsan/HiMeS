@@ -21,6 +21,10 @@ class ClaudeSettings(BaseSettings):
     model: str = "claude-sonnet-4-20250514"
     max_turns: int = 25
     max_tool_calls: int = 20
+    # Phase 1.5.10d — Feature-Flag für persistenten SDK-Client.
+    # True: claude-code-sdk mit wiederverwendetem Subprocess (schneller).
+    # False: ClaudeSubprocess (alter Weg, Kaltstart pro Nachricht).
+    use_sdk_client: bool = True
 
 
 class MCPSettings(BaseSettings):
