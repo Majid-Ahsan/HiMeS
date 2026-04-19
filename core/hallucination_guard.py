@@ -189,11 +189,23 @@ class HallucinationGuard:
             )
 
             if not backed:
+                # Enriched logging for v2-decision (Phase 1.5.25 monitoring):
+                # has_caldav shows whether claim came with CalDAV data in the
+                # same turn — informs whether we should add CalDAV to
+                # backed-prefixes in a future Smart-Skip variant.
+                has_caldav = any(
+                    t.startswith("mcp__caldav__") for t in tools_called
+                )
+                has_time = any(
+                    t.startswith("mcp__time__") for t in tools_called
+                )
                 log.warning(
                     "guard.unbacked_claim",
                     domain=domain.name,
                     matched=matched_patterns,
                     tools_called=tools_called,
+                    has_caldav=has_caldav,
+                    has_time=has_time,
                     text_len=len(text),
                 )
                 disclaimers.append(domain.disclaimer)
@@ -259,6 +271,48 @@ def build_default_guard() -> HallucinationGuard:
         patterns=db_patterns,
         tool_prefixes=db_tool_prefixes,
         disclaimer=db_disclaimer,
+    )
+
+    # ── Weekday-Halluzinations-Schutz (Phase 1.5.25) ──────────────────────
+    # Der Bug: Claude behauptet einen Wochentag für ein bestimmtes Datum,
+    # ohne time-MCP gegenzuchecken. Beleg-Beispiel (2026-04-18):
+    #   "Musikschule-Termine sind nicht morgen, sondern nächsten Donnerstag
+    #    (24. April) ..." — 24.04.2026 ist aber ein Freitag.
+    #
+    # Pattern-Design: Wochentag-Name UND Datum müssen nah zusammen stehen
+    # (innerhalb ~40 Zeichen). Wochentag allein oder Datum allein triggert
+    # nicht — nur die Kombination ist riskant.
+    #
+    # Tool-Prefix-Design: NUR mcp__time__ zählt als "backed". Bewusst NICHT
+    # CalDAV — der Bug entstand GERADE weil Claude CalDAV-Daten falsch
+    # zusammenfasste (halluzinierter Wochentag). Details: siehe Logs
+    # (has_caldav-Feld) für spätere v2-Smart-Skip-Entscheidung.
+    _weekday = (
+        r'(?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag)'
+    )
+    _date_dmy = r'\d{1,2}\.\s?\d{1,2}\.(?:\s?\d{2,4})?'
+    _date_iso = r'\d{4}-\d{2}-\d{2}'
+    _date_mn = (
+        r'\d{1,2}\.\s+(?:Januar|Februar|M(?:ä|ae)rz|April|Mai|Juni|Juli|'
+        r'August|September|Oktober|November|Dezember)(?:\s+\d{2,4})?'
+    )
+    _date_any = f'(?:{_date_dmy}|{_date_iso}|{_date_mn})'
+
+    weekday_patterns = [
+        # Weekday then date within 40 chars (non-greedy)
+        rf'\b{_weekday}\b.{{0,40}}?{_date_any}',
+        # Date then weekday within 40 chars (non-greedy)
+        rf'{_date_any}.{{0,40}}?\b{_weekday}\b',
+    ]
+    weekday_disclaimer = (
+        "\n\n⚠️ _Wochentag nicht über time-MCP verifiziert. "
+        "Bitte im Kalender gegenprüfen._"
+    )
+    guard.register_domain(
+        name="weekday",
+        patterns=weekday_patterns,
+        tool_prefixes=["mcp__time__"],
+        disclaimer=weekday_disclaimer,
     )
 
     return guard
