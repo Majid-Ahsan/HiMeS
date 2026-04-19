@@ -61,6 +61,37 @@ from claude_code_sdk import (  # noqa: E402
 from config.settings import settings  # noqa: E402
 
 
+# Phase 1.5.10e v2 — Tool-Whitelist.
+#
+# Der SDK bietet von Haus aus "ToolSearch" — Claude ruft das als erstes Tool
+# auf, um bei >10 verfügbaren Tools die Schemas on-demand nachzuladen. Im
+# Event-Log von Phase 1.5.10f bestätigt: ToolSearch wird bei jeder Anfrage
+# als Event 2-3 aufgerufen, kostet ~0.6-1.0s Roundtrip + mehrere Sekunden
+# Claude-Denkzeit davor. Summiert auf 5-7s pro Nachricht.
+#
+# Lösung: explizite Tool-Whitelist. Nur die aufgeführten Tools sind für
+# Claude sichtbar, ToolSearch entfällt automatisch. Server-Level-Prefixe
+# (z.B. ``mcp__caldav``) laden ALLE Tools des jeweiligen MCP-Servers —
+# kein Hardcoding einzelner Tool-Namen, robust gegen neue Tools.
+#
+# Bewusst NICHT in der Liste:
+# - ToolSearch (das wollen wir ja eliminieren)
+# - Bash, Edit, Write, Glob, Grep, NotebookEdit (Claude soll keine Files ändern)
+# - CronCreate/CronDelete/CronList, TodoWrite (verursachten BUG-2 in 1.5.11)
+# - Task, Agent, AskUserQuestion (keine Sub-Agenten)
+# - WebFetch, WebSearch (bis Brave Search MCP ready ist, Phase 1.5.9)
+# - EnterPlanMode, ExitPlanMode, EnterWorktree, ExitWorktree (irrelevant)
+_ALLOWED_TOOLS: list[str] = [
+    "Read",  # für Foto-/Dokument-Analyse (Phase 1.5.18)
+    "mcp__himes-tools",   # 14 Tools: memory (2) + notion (12)
+    "mcp__things3",       # create/list/complete tasks
+    "mcp__caldav",        # 9 Kalender-Tools
+    "mcp__weather",       # 3 Wetter-Tools
+    "mcp__time",          # get_current_time, convert_time
+    "mcp__deutsche-bahn", # 9+3 DB/VRR-Tools
+]
+
+
 class SDKClient:
     """Persistenter SDK-Client mit Singleton-Semantik.
 
@@ -82,22 +113,31 @@ class SDKClient:
     # ── Options / Lifecycle ────────────────────────────────────────────────
 
     def _build_options(self, system_prompt: str) -> ClaudeCodeOptions:
-        """Identische Settings wie claude_subprocess._build_command()."""
-        # Phase 1.5.10e — Experiment: ENABLE_TOOL_SEARCH=false brachte zwar
-        # einen Speed-Gewinn bei Things (22s→8.5s), führte aber parallel zu
-        # CalDAV-Fehlerantworten ("Verbindungsunterbrechung" obwohl Tools
-        # laut Log aufgerufen wurden). Korrelation ungeklärt → Default-
-        # Verhalten (auto) wiederhergestellt. Siehe Changelog v26.
-        return ClaudeCodeOptions(
-            system_prompt=system_prompt,
-            model=settings.claude.model,
-            max_turns=settings.claude.max_turns,
+        """Identische Settings wie claude_subprocess._build_command().
+
+        Phase 1.5.10e v2: optional ``allowed_tools`` — wenn gesetzt, entfällt
+        ToolSearch (siehe ``_ALLOWED_TOOLS``-Kommentar). Feature-Flag in
+        ``settings.claude.use_allowed_tools_whitelist`` — bei Problemen
+        auf False setzen, alter Zustand ist eine Environment-Änderung entfernt.
+        """
+        kwargs: dict[str, object] = {
+            "system_prompt": system_prompt,
+            "model": settings.claude.model,
+            "max_turns": settings.claude.max_turns,
             # mcp_servers akzeptiert einen Pfad (getestet in test_sdk.py) —
             # keine Format-Konvertierung nötig.
-            mcp_servers=str(settings.mcp.config_path),
-            permission_mode="bypassPermissions",
-            cwd="/app",
-        )
+            "mcp_servers": str(settings.mcp.config_path),
+            "permission_mode": "bypassPermissions",
+            "cwd": "/app",
+        }
+        if settings.claude.use_allowed_tools_whitelist:
+            kwargs["allowed_tools"] = list(_ALLOWED_TOOLS)
+            logger.info(
+                "sdk_client.allowed_tools_active",
+                count=len(_ALLOWED_TOOLS),
+                tools=_ALLOWED_TOOLS,
+            )
+        return ClaudeCodeOptions(**kwargs)
 
     async def start(self) -> None:
         """Startet den SDK-Client EINMAL beim Bot-Start."""
@@ -129,6 +169,82 @@ class SDKClient:
         finally:
             self._client = None
             logger.info("sdk_client.shutdown")
+
+    @staticmethod
+    def _log_debug_event(
+        user_id: int, request_start: float, event_index: int, msg: object
+    ) -> None:
+        """Debug-Hilfe für Phase 1.5.10f (Streaming-Planung).
+
+        Loggt jeden Event aus ``client.receive_response()`` mit:
+        - elapsed_ms seit Request-Start
+        - event_index (0-basiert, zeigt Reihenfolge)
+        - Typ-Name
+        - Kurz-repr (für alles was nicht AssistantMessage ist)
+
+        Für AssistantMessage zusätzlich: Block-Struktur. Damit können wir
+        erkennen, ob der SDK Delta-Streaming macht (viele AssistantMessages
+        mit je 1 TextBlock wachsender Länge) oder Block-Streaming (1
+        AssistantMessage pro Turn mit kompletten Blöcken).
+        """
+        elapsed_ms = int((time.perf_counter() - request_start) * 1000)
+        msg_type = type(msg).__name__
+
+        if isinstance(msg, AssistantMessage):
+            blocks = []
+            for block in msg.content:
+                btype = type(block).__name__
+                if isinstance(block, TextBlock):
+                    text = block.text or ""
+                    blocks.append(
+                        {
+                            "type": btype,
+                            "text_len": len(text),
+                            "text_preview": text[:80],
+                        }
+                    )
+                elif isinstance(block, ToolUseBlock):
+                    blocks.append(
+                        {
+                            "type": btype,
+                            "tool_name": getattr(block, "name", ""),
+                            "tool_id": getattr(block, "id", "")[:16],
+                        }
+                    )
+                else:
+                    blocks.append(
+                        {"type": btype, "repr": repr(block)[:100]}
+                    )
+            logger.info(
+                "sdk_client.debug_event",
+                user_id=user_id,
+                event_index=event_index,
+                elapsed_ms=elapsed_ms,
+                msg_type=msg_type,
+                block_count=len(msg.content),
+                blocks=blocks,
+            )
+        else:
+            extra: dict[str, object] = {}
+            if isinstance(msg, ResultMessage):
+                result_text = getattr(msg, "result", None)
+                extra.update(
+                    {
+                        "subtype": getattr(msg, "subtype", ""),
+                        "result_len": len(result_text) if isinstance(result_text, str) else 0,
+                        "num_turns": getattr(msg, "num_turns", 0),
+                        "duration_ms_sdk": getattr(msg, "duration_ms", 0),
+                    }
+                )
+            logger.info(
+                "sdk_client.debug_event",
+                user_id=user_id,
+                event_index=event_index,
+                elapsed_ms=elapsed_ms,
+                msg_type=msg_type,
+                repr=repr(msg)[:300],
+                **extra,
+            )
 
     async def _restart(self) -> None:
         """Client neu starten (z.B. bei Tageswechsel oder Fehler)."""
@@ -190,14 +306,28 @@ class SDKClient:
             # Antwort landen (Regression gegenüber CLI-Subprocess-Weg).
             intermediate_text = ""
 
+            debug_events = settings.claude.debug_sdk_events
+            event_index = 0
+
             try:
                 await client.query(prompt)
+
+                if debug_events:
+                    logger.info(
+                        "sdk_client.debug_stream_start",
+                        user_id=user_id,
+                        prompt_preview=prompt[:80],
+                    )
 
                 tool_call_count = 0
 
                 async for msg in client.receive_response():
                     if msg is None:
                         continue
+
+                    if debug_events:
+                        self._log_debug_event(user_id, t0, event_index, msg)
+                        event_index += 1
 
                     if isinstance(msg, AssistantMessage):
                         for block in msg.content:
@@ -258,6 +388,14 @@ class SDKClient:
                     # Stream endete ohne ResultMessage — gesammelten Text nehmen
                     if intermediate_text and not response.text:
                         response.text = intermediate_text
+
+                if debug_events:
+                    logger.info(
+                        "sdk_client.debug_stream_end",
+                        user_id=user_id,
+                        event_count=event_index,
+                        elapsed_ms=int((time.perf_counter() - t0) * 1000),
+                    )
 
             except Exception as exc:
                 logger.error(

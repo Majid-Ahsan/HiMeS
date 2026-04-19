@@ -25,6 +25,18 @@ class ClaudeSettings(BaseSettings):
     # True: claude-code-sdk mit wiederverwendetem Subprocess (schneller).
     # False: ClaudeSubprocess (alter Weg, Kaltstart pro Nachricht).
     use_sdk_client: bool = True
+    # Phase 1.5.10f — Debug-Flag für SDK-Event-Inspection (temporär).
+    # True: jedes Event aus client.receive_response() wird geloggt
+    # (Typ, elapsed_ms, repr[:300], bei AssistantMessage zusätzlich
+    # Block-Struktur). NIEMALS in Production dauerhaft an — produziert
+    # pro Nachricht ~10-50 zusätzliche Log-Zeilen.
+    debug_sdk_events: bool = False
+    # Phase 1.5.10e v2 — explizite Tool-Whitelist statt Anthropic-eigener
+    # ToolSearch (5-7s Overhead pro Anfrage bei >10 Tools).
+    # True: nur die 6 MCP-Server + Read sind verfügbar, ToolSearch und
+    # gefährliche Built-ins (Bash/Write/Cron/TodoWrite) sind ausgeschlossen.
+    # False: alle Tools deferred (bisheriges Verhalten).
+    use_allowed_tools_whitelist: bool = True
 
 
 class MCPSettings(BaseSettings):
