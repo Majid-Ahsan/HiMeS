@@ -31,12 +31,20 @@ class ClaudeSettings(BaseSettings):
     # Block-Struktur). NIEMALS in Production dauerhaft an — produziert
     # pro Nachricht ~10-50 zusätzliche Log-Zeilen.
     debug_sdk_events: bool = False
-    # Phase 1.5.10e v2 — explizite Tool-Whitelist statt Anthropic-eigener
+    # Phase 1.5.10e v2a — explizite Tool-Whitelist statt Anthropic-eigener
     # ToolSearch (5-7s Overhead pro Anfrage bei >10 Tools).
     # True: nur die 6 MCP-Server + Read sind verfügbar, ToolSearch und
     # gefährliche Built-ins (Bash/Write/Cron/TodoWrite) sind ausgeschlossen.
     # False: alle Tools deferred (bisheriges Verhalten).
     use_allowed_tools_whitelist: bool = True
+    # Phase 1.5.10e v2b — ToolSearch komplett abschalten via ENABLE_TOOL_SEARCH
+    # env-var an den CLI-Subprocess. Mit v2a allein bleibt ToolSearch aktiv
+    # (filtert Meta-Tools nicht), verursacht aber 0.6-1.0s Roundtrip +
+    # Claude-Denkzeit pro Anfrage. v2b killt den Roundtrip komplett.
+    # Historisch: in 1.5.10e v1 (ohne v2a) verursachte das scheinbar CalDAV-
+    # Fehler — Ursache waren aber 3 unabhängige CalDAV-Bugs (in 1.5.21 gefixt).
+    # Bei Regression dieses Flag auf False setzen, v2a bleibt aktiv.
+    disable_tool_search: bool = True
 
 
 class MCPSettings(BaseSettings):

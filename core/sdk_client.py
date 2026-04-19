@@ -137,6 +137,13 @@ class SDKClient:
                 count=len(_ALLOWED_TOOLS),
                 tools=_ALLOWED_TOOLS,
             )
+        # Phase 1.5.10e v2b — ToolSearch-Meta-Tool komplett deaktivieren.
+        # Separater Flag damit v2b isoliert revertierbar ist (Split-Strategie).
+        if settings.claude.disable_tool_search:
+            existing_env = dict(kwargs.get("env") or {})
+            existing_env["ENABLE_TOOL_SEARCH"] = "false"
+            kwargs["env"] = existing_env
+            logger.info("sdk_client.tool_search_disabled")
         return ClaudeCodeOptions(**kwargs)
 
     async def start(self) -> None:
