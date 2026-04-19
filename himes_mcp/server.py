@@ -1,6 +1,8 @@
-"""HiMeS Tools MCP Server — Memory + Notion (native API)."""
+"""HiMeS Tools MCP Server — Memory + Notion + Time-Arithmetic (native)."""
 
+import json
 import os
+from datetime import date, timedelta
 
 import aiofiles
 import structlog
@@ -48,6 +50,89 @@ async def list_tools() -> list[Tool]:
                     "content": {"type": "string", "description": "Neuer Inhalt für MEMORY.md"},
                 },
                 "required": ["content"],
+            },
+        ),
+        # ── Datum/Wochentag-Arithmetik (Phase 1.5.30) ──
+        # Claude darf NIEMALS Wochentage/Datumsarithmetik selbst rechnen —
+        # stattdessen diese Tools aufrufen. LLMs machen regelmäßig Off-by-One.
+        Tool(
+            name="get_weekday_for_date",
+            description=(
+                "Liefert den deutschen Wochentags-Namen für ein ISO-Datum. "
+                "IMMER nutzen wenn Wochentag aus Datum benötigt wird — NIEMALS "
+                "selbst rechnen."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "iso_date": {
+                        "type": "string",
+                        "description": "ISO-Datum im Format YYYY-MM-DD, z.B. '2026-04-24'",
+                    },
+                },
+                "required": ["iso_date"],
+            },
+        ),
+        Tool(
+            name="add_days",
+            description=(
+                "Addiert eine bestimmte Anzahl Tage zu einem Datum und gibt "
+                "neues Datum + Wochentag zurück. Für 'in N Tagen' / 'vor N Tagen' "
+                "(negative Zahl). IMMER nutzen statt im Kopf rechnen."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "iso_date": {
+                        "type": "string",
+                        "description": "Start-Datum YYYY-MM-DD",
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "Anzahl Tage (positiv = Zukunft, negativ = Vergangenheit)",
+                    },
+                },
+                "required": ["iso_date", "days"],
+            },
+        ),
+        Tool(
+            name="days_between",
+            description=(
+                "Anzahl Tage zwischen zwei Daten. Für 'wie viele Tage bis X' "
+                "oder 'vor N Tagen war Y'. Vorzeichen: end - start."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string", "description": "YYYY-MM-DD"},
+                    "end_date": {"type": "string", "description": "YYYY-MM-DD"},
+                },
+                "required": ["start_date", "end_date"],
+            },
+        ),
+        Tool(
+            name="next_weekday",
+            description=(
+                "Nächstes Vorkommen eines Wochentags ab einem Referenzdatum. "
+                "Wenn Referenzdatum bereits der gesuchte Wochentag ist → 0 Tage. "
+                "Nutze für 'nächster Freitag' / 'nächster Montag'-Fragen."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "from_date": {
+                        "type": "string",
+                        "description": "Referenzdatum YYYY-MM-DD",
+                    },
+                    "weekday": {
+                        "type": "string",
+                        "description": (
+                            "Wochentag auf Deutsch: Montag/Dienstag/Mittwoch/"
+                            "Donnerstag/Freitag/Samstag/Sonntag"
+                        ),
+                    },
+                },
+                "required": ["from_date", "weekday"],
             },
         ),
         # ── Notion: Navigation ──
@@ -281,6 +366,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 return await _memory_read()
             case "memory_write":
                 return await _memory_write(**arguments)
+            # Datum/Wochentag (Phase 1.5.30)
+            case "get_weekday_for_date":
+                return _get_weekday_for_date(**arguments)
+            case "add_days":
+                return _add_days(**arguments)
+            case "days_between":
+                return _days_between(**arguments)
+            case "next_weekday":
+                return _next_weekday(**arguments)
             # Notion navigation
             case "notion_search":
                 return await _notion_search(**arguments)
@@ -352,6 +446,97 @@ async def _memory_write(content: str) -> list[TextContent]:
         await f.write(content)
     logger.info("memory.written", path=str(path), size=len(content))
     return [_text("MEMORY.md aktualisiert.")]
+
+
+# ── Datum/Wochentag-Arithmetik (Phase 1.5.30) ──────────────────────────
+# Claude halluziniert regelmäßig Wochentage und macht Off-by-One-Fehler
+# bei Datumsarithmetik (Wochen-Zusammenfassung 2026-04-19: "Do 24, Fr 25,
+# Sa 26" statt "Fr 24, Sa 25, So 26"). Diese Tools zwingen deterministisches
+# Python-zoneinfo statt LLM-Rechnen.
+
+_WEEKDAY_DE = {
+    0: "Montag", 1: "Dienstag", 2: "Mittwoch", 3: "Donnerstag",
+    4: "Freitag", 5: "Samstag", 6: "Sonntag",
+}
+_WEEKDAY_DE_REV = {v.lower(): k for k, v in _WEEKDAY_DE.items()}
+
+
+def _weekday_for(d: date) -> dict:
+    wd = d.weekday()
+    return {
+        "weekday_name": _WEEKDAY_DE[wd],
+        "weekday_number": wd,  # 0 = Montag, 6 = Sonntag
+        "is_weekend": wd >= 5,
+    }
+
+
+def _get_weekday_for_date(iso_date: str) -> list[TextContent]:
+    try:
+        d = date.fromisoformat(iso_date)
+    except ValueError as e:
+        return [_text(f"Ungültiges Datum {iso_date!r}: {e}")]
+    payload = {"iso_date": iso_date, **_weekday_for(d)}
+    return [_text(json.dumps(payload, ensure_ascii=False))]
+
+
+def _add_days(iso_date: str, days: int) -> list[TextContent]:
+    try:
+        d = date.fromisoformat(iso_date)
+    except ValueError as e:
+        return [_text(f"Ungültiges Datum {iso_date!r}: {e}")]
+    result = d + timedelta(days=int(days))
+    payload = {
+        "start_date": iso_date,
+        "days_added": int(days),
+        "result_date": result.isoformat(),
+        **_weekday_for(result),
+    }
+    return [_text(json.dumps(payload, ensure_ascii=False))]
+
+
+def _days_between(start_date: str, end_date: str) -> list[TextContent]:
+    try:
+        s = date.fromisoformat(start_date)
+        e = date.fromisoformat(end_date)
+    except ValueError as err:
+        return [_text(f"Ungültiges Datum: {err}")]
+    diff = (e - s).days
+    payload = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "days": diff,
+        "is_future": diff > 0,
+    }
+    return [_text(json.dumps(payload, ensure_ascii=False))]
+
+
+def _next_weekday(from_date: str, weekday: str) -> list[TextContent]:
+    """Nächstes Vorkommen von ``weekday`` ab ``from_date`` (0 wenn selber Tag).
+
+    Semantik: "nächster Freitag" an einem Freitag = derselbe Tag (0 Tage).
+    Wenn User "nächster Freitag = in einer Woche" meint, muss er das im
+    Prompt klarmachen; das Tool interpretiert "nächster" als "ab jetzt".
+    """
+    try:
+        d = date.fromisoformat(from_date)
+    except ValueError as e:
+        return [_text(f"Ungültiges Datum {from_date!r}: {e}")]
+    target = _WEEKDAY_DE_REV.get(weekday.strip().lower())
+    if target is None:
+        return [_text(
+            f"Unbekannter Wochentag {weekday!r}. "
+            f"Gültig: Montag, Dienstag, Mittwoch, Donnerstag, Freitag, Samstag, Sonntag."
+        )]
+    days_until = (target - d.weekday()) % 7
+    result = d + timedelta(days=days_until)
+    payload = {
+        "from_date": from_date,
+        "weekday_requested": _WEEKDAY_DE[target],
+        "result_date": result.isoformat(),
+        "days_until": days_until,
+        **_weekday_for(result),
+    }
+    return [_text(json.dumps(payload, ensure_ascii=False))]
 
 
 # ── Notion: Navigation ─────────────────────────────────────────────────

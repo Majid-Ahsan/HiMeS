@@ -308,10 +308,20 @@ def build_default_guard() -> HallucinationGuard:
         "\n\n⚠️ _Wochentag nicht über time-MCP verifiziert. "
         "Bitte im Kalender gegenprüfen._"
     )
+    # Phase 1.5.30 — Datum-Tools in himes-tools zählen ebenfalls als backed.
+    # Claude soll diese statt time-MCP convert_time nutzen (die neueren Tools
+    # können Wochentage für beliebige Zukunfts-Daten ausrechnen).
+    weekday_tool_prefixes = [
+        "mcp__time__",
+        "mcp__himes-tools__get_weekday_for_date",
+        "mcp__himes-tools__add_days",
+        "mcp__himes-tools__days_between",
+        "mcp__himes-tools__next_weekday",
+    ]
     guard.register_domain(
         name="weekday",
         patterns=weekday_patterns,
-        tool_prefixes=["mcp__time__"],
+        tool_prefixes=weekday_tool_prefixes,
         disclaimer=weekday_disclaimer,
     )
 
