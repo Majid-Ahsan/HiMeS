@@ -1,5 +1,5 @@
 # HiMeS — MASTER REFERENCE
-> **Version:** v24 · **Stand:** 2026-04-16 · **Pfad:** `docs/MASTER-REFERENCE.md`
+> **Version:** v25.1 · **Stand:** 2026-04-19 · **Pfad:** `docs/MASTER-REFERENCE.md`
 > **Nutzung:** `Lies docs/MASTER-REFERENCE.md und fahre fort mit Phase [X.Y]: [Task].`
 > **Nach Task:** Status in dieser Datei updaten + committen.
 
@@ -19,9 +19,10 @@
 | 1.5.5 | Config Sync + MCPs | 🔶 | Filesystem MCP ⬜, .gitignore ⬜, max_tool_calls sync ⬜ (Time MCP ✅) |
 | 1.5.6 | MEMORY.md Init | ⬜ | Auto-Erstellung bei Startup |
 | 1.5.7 | System Prompt extern | 🔶 | In prompts/system.md auslagern (Prompt selbst ✅, dynamisches Datum ✅) |
-| 1.5.8 | Health Monitoring | ⬜ | Self-Check + Telegram Alert |
+| 1.5.8 | Health Monitoring | ⬜ | **Reihenfolge kritisch**: ZUERST /health-Endpoint in `core.orchestrator` implementieren (aiohttp, Port 8080), DANN healthcheck-Block in `docker-compose.yml` reaktivieren. Endpoint MUSS vor healthcheck existieren, sonst Container-Restart-Loop. Der Block wurde am 2026-04-17 entfernt weil curl auf Port 8080 fehlschlug (Bot hatte keinen HTTP-Server). Zusätzlich: Self-Check alle 5min + Telegram-Alert an TELEGRAM_ADMIN_CHAT_ID, Anti-Spam 1 Alert/Fehlertyp/Stunde. |
 | 1.5.9 | Brave Search MCP | ⬜ | mcp_config.json + BRAVE_API_KEY |
-| 1.5.10 | Latenz-Optimierung | ✅ | Typing-Indikator ✅ (4s-Loop), Pre-Classification ✅ (Instant Replies), claude-code-sdk Integration ✅ (persistenter Singleton-Client, Subprocess-Fallback, Daily-Restart via date.today(), ResultMessage.result als Source-of-Truth). Gemessen: Folge-Nachrichten ~15s statt ~30s, kurze Frage ohne Tool ~4s. **1.5.10e (ToolSearch-Off via env-Var) reverted — offen für 2. Anlauf mit allowed_tools-Whitelist.** |
+| 1.5.10 | Latenz-Optimierung | ✅ KOMPLETT | 1.5.10 abgeschlossen. Pre-Classification, Typing-Indikator, SDK-Singleton, ToolSearch-Off (v2a Whitelist + v2b Env-Var, Commits 15da656 + 3c316b2). Gesamtergebnis: -20 bis -77% Latenz je nach Szenario. Tool-heavy limitiert durch externe APIs (iCloud/HAFAS). Phase 1.5.10f (Streaming) durch SDK-Limit nicht als Token-Stream machbar — umgedeutet zu Tool-Progress-Updates (siehe 1.5.10f). |
+| 1.5.10f | Tool-Progress-Updates | ⬜ Optional | Umdeutung von ursprünglich geplantem Token-Streaming (durch SDK-Limit nicht machbar, ADR-024). Neu: Bei ToolUseBlock-Events editierbare Status-Zeile in Telegram ("🔧 CalDAV wird abgefragt…"). Macht tool-heavy Anfragen (Wochenübersicht 40s) subjektiv erträglich. NACH 1.5.22 und 1.5.26. |
 | 1.5.12 | Rich Media Output | ✅ | Deployed+getestet: Notion-Fotos ✅, PDF/Audio/Location Parser bereit (Maps MCP fehlt noch) |
 | 1.5.14 | Notion Query Bugs | ✅ | 5 Bugs: Relation-Filter, DB-Zuordnung, Query-Strategie, Fallback, Parent-Kontext |
 | 1.5.15 | Kalender-Bugs | ✅ | 3 Bugs: Bestätigung nach Erstellung, Apple-Maps-Ort, ORGANIZER für Einladungen |
@@ -31,9 +32,17 @@
 | 1.5.19 | DB + VRR Nahverkehr | ✅ | Self-hosted db-rest, VRR-Produkte (U/Tram/Bus), Gleis-Fix, 1+4 Verbindungen, Telegram-Design, zuginfo.nrw, Adress-Routing |
 | 1.5.20 | DB-MCP Stabilisierung + Halluzinations-Schutz | ✅ | 4 Bugs gefixt (DB-FIX-1 bis DB-FIX-4): HallucinationGuard, strukturierte Error-Dicts, Live-Status-Tool, Format-Polish |
 | 1.5.21 | CalDAV Stabilität | ✅ | 3 Bugs gefixt (in caldav-mcp Repo): Starlette-SSE-Route returnt Response statt None, Phase-1.5.15-Extensions committet (Nominatim/update_event/ORGANIZER), Retry-Decorator auf 9 Apple-facing Methoden bei keepalive timeout. 95 Unit-Tests + 1 E2E-Smoke-Test, live mit injiziertem NiqConnError verifiziert. |
-| 1.5.22 | Zukunfts-Architektur vorbereiten | ⬜ | Rückwärtskompatible Vorbereitungen für Phase 2: ClaudeBackend-Interface, UserContext durchreichen, MCP-Kategorisierung, Deployment-Standard. Macht Multi-User/Sub-Agents/Dynamic-MCP später ohne großes Refactoring möglich. Siehe Sektion 2a. |
+| 1.5.22 | Zukunfts-Architektur vorbereiten | ⬜ | **PRIORITÄT HOCH — kritischer Pfad.** ClaudeBackend-Protocol so designen, dass späterer Wechsel zu API/Hybrid/Realtime ohne Refactoring möglich ist. Muss VOR 1.5.4 und 1.5.2 gebaut werden, damit diese Features direkt ins neue Protocol einfließen. Siehe Sektion 2a + 1b + 1c + ADR-026. |
+| 1.5.23 | MCP: Time + Filesystem | ⬜ Offen | time + filesystem MCP in mcp_config.json + Dockerfile (npx) |
+| 1.5.24 | MCP Warmup Reihenfolge | ⬜ Offen | Warmup priorisiert: kritische MCPs zuerst, optional lazy |
+| 1.5.25 | Wochentag-Halluzinations-Schutz | ⬜ | System-Prompt-Regel: Wochentag aus Datum IMMER via time-MCP, nie geraten. Optional HallucinationGuard-Pattern. Siehe Sektion 1b + Prompt-Template in 14. 15-30 Min Aufwand. |
+| 1.5.26 | Tool-Manifest + Proaktivitäts-Regel | ⬜ | Jarvis bekommt aktive Selbstkenntnis über seine Werkzeuge und Skills. prompts/tool_manifest.md + prompts/skill_manifest.md (auto-generiert aus mcp_config.json). System-Prompt-Erweiterung mit Cross-Over-Regel (Kalender+Wetter, Bahn+Kalender, Notion+Kalender, etc.). Fundament für Phase 2.7 Self-Improvement. Reihenfolge: NACH 1.5.22, VOR 1.5.4. Siehe Sektion 1d. |
+| 1.5.27 | Tool-Loop-Guard im Orchestrator | ⬜ | Mittlere Priorität. Im selben Turn ein Tool mit identischen Args >2× → synthetisches Error-Result zurückgeben ("Tool wurde bereits X-fach mit diesen Args aufgerufen, Ergebnis war: …"), statt echten Call zu wiederholen. Beleg: Log vom 2026-04-17 zeigt `caldav_get_today_events` 11× hintereinander in einem Turn (turns=13, Kosten $0.18). Würde CalDAV-Latenz bei Wochenübersichten senken. Reihenfolge: NACH 1.5.4 (Session-Store liefert die History). |
+| 1.5.28 | things-mcp Härtung | ⬜ | Niedrige Priorität. Input-Sanitization (Unicode-Control-Chars, Date-Format-Validation), Dry-Run-Mode. Aktivieren sobald Things Cloud clean — wartet auf Cultured Code Support. Reihenfolge: NACH 1.5.3 (Error Recovery). |
 
-**Empfohlene Reihenfolge:** ~~1.5.11~~ → ~~1.5.12~~ → ~~1.5.14~~ → ~~1.5.15~~ → ~~1.5.16~~ → ~~1.5.17~~ → ~~1.5.18~~ → ~~1.5.19~~ → ~~1.5.20~~ → ~~1.5.10~~ → ~~1.5.21~~ → **1.5.22** → 1.5.5 → 1.5.6 → 1.5.7 → 1.5.9 → 1.5.2 → 1.5.3 → 1.5.4 → 1.5.8
+**Empfohlene Reihenfolge:** ~~1.5.11~~ → ~~1.5.12~~ → ~~1.5.14~~ → ~~1.5.15~~ → ~~1.5.16~~ → ~~1.5.17~~ → ~~1.5.18~~ → ~~1.5.19~~ → ~~1.5.20~~ → ~~1.5.10~~ → ~~1.5.21~~ → ~~1.5.10e v2~~ → **1.5.22 (kritischer Pfad)** → **1.5.26 (Tool-Manifest)** → 1.5.4 (Session-Store) → 1.5.27 (Tool-Loop-Guard) → 1.5.2 (Message-Splitting) → 1.5.6 → 1.5.7 → 1.5.3 → 1.5.28 (things-mcp Härtung) → 1.5.8 → 1.5.5 → 1.5.9 → 1.5.10f (optional) → 1.5.23 → 1.5.24
+
+**Rationale:** 1.5.22 ist kritischer Pfad, weil es die Architektur für spätere API-Migration vorbereitet. 1.5.26 direkt danach, damit Skills und Tool-Manifest vor Session-Store und Feature-Entwicklung stehen — sonst müssen Features später nachgezogen werden.
 
 ---
 
@@ -57,19 +66,20 @@ Drei unabhängige Bugs im separaten `caldav-mcp` Repo:
 
 **Verifikation**: 95 Unit-Tests grün (86 alt + 9 neu in `tests/test_retry.py`) + 1 E2E-Smoke-Test in `tests/e2e/test_stale_reconnect_e2e.py` mit injiziertem `NiqConnError` (Commit `45af46f`). 2 reale Telegram-Tests (Termine morgen + Wochenübersicht) + 1 Live-Reproduktion zeigt `stale_connection_detected → reconnect (635ms) → retrying → OK 1.44s gesamt`.
 
-### Aktuelle Performance-Zahlen
+### Aktuelle Performance-Zahlen (nach 1.5.10e v2, Stand 2026-04-19)
 
-| Szenario | Vorher | Jetzt |
-|---|---|---|
-| "Danke"/"Hallo" (Pre-Classification) | ~15s | **<0.1s** |
-| Einfache Frage ohne Tool | ~15-30s | **~4s** |
-| Mit einem Tool (Wetter, Things3) | ~20s | **5-10s** |
-| CalDAV Tages-Übersicht (10+ Kalender einzeln) | ~30s | **~30s** (gewünscht, limitiert durch Apple-Round-Trips) |
-| CalDAV Wochen-Übersicht | ~40s | **~40s** |
-| DB Zug-Verbindung | ~20s | **~20s** (HAFAS intrinsisch langsam) |
-| Erste Nachricht nach Bot-Start | ~30s | **~30s** (MCP Cold-Start, eager loading) |
+| Szenario | Pre-1.5.10 | 1.5.10d | v2-Final | Δ gesamt |
+|---|---|---|---|---|
+| Pre-Classification ("danke") | ~15s | <0.1s | <0.1s | -99% |
+| Kein Tool, kurz ("wie spät") | ~20s | 11.6s | **7.3s** | -63% |
+| Kein Tool, mittel ("kardiomyopathie") | ~30s | 8.5s | **6.8s** | -77% |
+| 1 Tool (Wetter, Things3) | ~20s | 7-8s | 5-7s | -65-75% |
+| CalDAV Tag (~11 Tools) | ~30s | 35.3s | **32.9s** | ~-10% (Apple-limited) |
+| CalDAV Woche (~10 Tools) | ~40s | — | **39.4s** | Apple-limited |
+| Notion komplex (3 Tools) | — | — | **37.0s** | Session-state (Hinweis 1.5.4) |
+| Erste Nachricht nach Bot-Start | ~30s | ~30s | ~30s | MCP Cold-Start |
 
-Verbesserung **70-80%** bei normalen Nachrichten. Bei tool-lastigen Calls limitiert durch externe APIs.
+**Verbesserung gesamt**: -20% bis -99% je nach Szenario. Einfache Nachrichten massiv, tool-heavy limitiert durch externe APIs (iCloud, HAFAS). Weitere Latenz-Gewinne nur durch API-Migration (ADR-009/026) oder parallele Tool-Execution (erst mit API möglich).
 
 ### Offene Punkte aus heute
 
@@ -83,6 +93,232 @@ Verbesserung **70-80%** bei normalen Nachrichten. Bei tool-lastigen Calls limiti
 2. **`docs/himes-dashboard.html`**: Untracked seit Tagen, Herkunft unklar. Committen oder in `.gitignore`?
 
 3. **Phase 1.5.10e zweiter Anlauf**: ToolSearch-Overhead (5-7s pro Tool-Call) eliminierbar. Jetzt wo CalDAV stabil ist wieder machbar. Diesmal mit explizitem `allowed_tools`-Whitelist statt `ENABLE_TOOL_SEARCH`. Nicht kritisch — kann warten.
+
+---
+
+## 1b. UPDATE 2026-04-19 — Strategische Neuausrichtung
+
+### Analyse-Session Ergebnisse
+
+Nach ausführlichem Latenz-Debug und Vergleich mit Hermes Agent (NousResearch/hermes-agent) wurden vier Erkenntnisse erarbeitet:
+
+**1. SDK-Streaming-Limit bestätigt (Event-Log-basiert)**
+
+Event-Log von 5 realen Telegram-Anfragen am 17.-18.04.2026 zeigte:
+- "wie spät": 1× TextBlock (text_len=87) bei elapsed=11569ms von 11645ms
+- "kardiomyopathie": 1× TextBlock (text_len=594) bei 8241ms von 8520ms
+- "termine morgen": 1× TextBlock (text_len=225) bei 35256ms von 35344ms (88ms Puffer!)
+- "musikschule?": 1× TextBlock (text_len=368) bei 25262ms von 25275ms
+- "wetter?": 1× TextBlock (text_len=354) bei 23514ms von 23727ms
+
+→ `claude-agent-sdk==0.0.25` aggregiert Content-Blöcke im MessageParser. Token-für-Token-Streaming zu Telegram ist nicht möglich ohne SDK-Bypass bzw. API-Migration.
+
+**2. Strategie-Entscheidung: CLI/SDK bleibt**
+
+Majid bleibt bei CLI/SDK aus Kosten-Gründen (Abo deckt Testing ab, API würde bei hohem Test-Volumen Kosten verursachen). Migration auf API bewusst aufgeschoben — aber Architektur wird jetzt vorbereitet (Phase 1.5.22).
+
+**3. Phase 1.5.22 wird kritischer Pfad**
+
+ClaudeBackend-Protocol muss so designed werden, dass:
+- CLI/SDK heute läuft (kein Kosten-Impact)
+- API-Backend später als zweites Backend einhängbar ist
+- Realtime-Backend (wenn Anthropic es bringt) als drittes Backend einhängbar ist
+- Umschaltung = Feature-Flag, kein Refactoring
+
+Je länger Features ohne dieses Protocol gebaut werden, desto mehr doppelter Anpassungsaufwand später.
+
+**4. Phase 1.5.10f umgedeutet**
+
+Ursprünglich "Token-Streaming an Telegram" geplant, durch SDK-Limit (siehe Punkt 1) nicht realisierbar. Neu: "Tool-Progress-Updates" — bei ToolUseBlock-Events editierbare Status-Nachricht in Telegram. Macht tool-heavy Anfragen subjektiv erträglich. Optional, nach 1.5.22 und 1.5.26.
+
+### Phase 1.5.10e v2 — heute abgeschlossen
+
+**v2a (Whitelist, Commit 15da656):**
+- `allowed_tools`-Whitelist in `ClaudeCodeOptions`
+- Automatische Tool-Discovery aus `mcp_config.json`
+- Security-Gewinn: CronCreate/TodoWrite/Bash/Edit/Write hart verhindert (BUG-2 aus 1.5.11 jetzt architektonisch ausgeschlossen, nicht nur per Prompt)
+
+**v2b (Env-Var, Commit 3c316b2):**
+- `ENABLE_TOOL_SEARCH=false` in ClaudeCodeOptions.env
+- ToolSearch aus `tools_used` komplett verschwunden
+- Weitere ~1s pro Anfrage, Cleanness in Tools-Liste
+
+**Messergebnisse siehe Performance-Tabelle in 1a.**
+
+**Gelernte Lektionen:**
+- Erhoffte "+4-5s pro Tool-Call" nicht eingetreten. Real: +1-2s.
+- Der große Win kam von v2a (Whitelist → eager schema loading), nicht v2b (ToolSearch-Kill).
+- Bei tool-heavy Anfragen (CalDAV 10×, Notion 3×) ist Bottleneck externe APIs (iCloud-Round-Trips, HAFAS), nicht ToolSearch.
+- **Nebenfund**: Session-Kosten-Kurve beobachtet (persistent SDK-Client sammelt Context über Anfragen, cost_usd stieg auf $0.43 über Session). Hinweis auf Bedarf für Phase 1.5.4 Session-Cleanup.
+
+### Neue Prioritäten-Reihenfolge
+
+1. **1.5.22** — Zukunfts-Architektur mit API-Migrations-Vorbereitung (~1 Woche)
+2. **1.5.26** — Tool-Manifest + Proaktivitäts-Regel (1-2 Tage)
+3. **1.5.4** — Session-Store SQLite+FTS5 (direkt ins neue Protocol, 3-5 Tage)
+4. **1.5.2** — Message-Splitting (platform-aware, 1-2 Tage)
+5. 1.5.6, 1.5.7, 1.5.3, 1.5.8 — kleinere Features (je 1-2 Tage)
+6. 1.5.10f — Tool-Progress-Updates (optional)
+
+### Offene Sub-Tickets (nicht vergessen)
+
+- **Kalender-Halluzinations-Bug (Musikschule)**: In Anfrage "musikschule?" (2026-04-18) antwortete Claude mit "nächsten Donnerstag" für Event 2026-04-24 — aber 2026-04-24 ist ein Freitag. Vermutung: Wochentag aus Datum halluziniert statt time-MCP-Gegencheck. **Separates Mini-Ticket** (Phase 1.5.25): System-Prompt-Regel ergänzen ("Bei Wochentag-Angabe IMMER time-MCP oder Python-Rechnung, nie aus Datum raten"). Eventuell HallucinationGuard um Wochentag-Pattern erweitern. 15-30 min Aufwand.
+
+- **caldav-mcp Remote-Strategie** (aus 1.5.21): Commits 93608f1, 3802c56, 86ce5e3, 45af46f liegen nur auf VPS. Entscheidung offen (Fork vs Submodule vs vendor/).
+
+- **docs/himes-dashboard.html**: Untracked, Entscheidung committen oder .gitignore.
+
+---
+
+## 1c. KOSTEN-STRATEGIE + VOICE-PFAD (2026-04-19)
+
+### Heute
+
+- **Claude Code CLI mit OAuth-Token** (Abo-basiert)
+- **0€ API-Kosten** — alle LLM-Calls gehen über Abo-Quota
+- Testing während Entwicklung unbegrenzt ohne Kostensorge
+
+### Morgen (optional, Majid entscheidet)
+
+- **Hybrid-Modus** möglich: einfache Fragen über API (schnell, kostet pro Request), tool-heavy über CLI (Abo-gedeckt, langsamer aber gratis)
+- Feature-Flag `CLAUDE_BACKEND=sdk|api|hybrid`
+- Umschaltung ohne Code-Änderung (vorbereitet durch Phase 1.5.22)
+
+### Zukunft (wenn Anthropic Realtime-API bringt)
+
+- Neues Backend `RealtimeBackend` einhängen
+- Voice-Pfad: Telegram Voice → Whisper streaming → RealtimeBackend → TTS streaming
+- Zielzeit: 2-4s Ende-zu-Ende (ChatGPT-Niveau 300ms nicht erreichbar ohne WebRTC)
+
+### Voice: aktuell NICHT möglich
+
+Mit heutigem Stack (CLI-SDK, 15-40s Latenz) ist Voice-Konversation unbenutzbar. Voice-Features warten explizit auf:
+- (a) Anthropic Realtime-API ODER
+- (b) API-Migration + WebSocket-Layer (Whisper streaming + Claude streaming + TTS streaming)
+
+Nicht vor Phase 3.
+
+---
+
+## 1d. PHASE 1.5.26 — Tool-Manifest + Proaktivitäts-Regel
+
+### Ziel
+
+Jarvis hat aktive Selbstkenntnis über seine Werkzeuge und Skills. Bei einer Aufgabe prüft er: "Welche meiner Tools helfen hier? Welche Skills passen? Kann ich Cross-Over machen?"
+
+### Vision
+
+Beispiel: User fragt "Plan morgen für Marien-Hospital Bottrop"
+
+Jarvis denkt strukturiert:
+- Kalender → welche Termine morgen?
+- Wetter → Regen? → beeinflusst Transport-Entscheidung
+- Bahn → Mülheim → Bottrop Verbindung zum ersten Termin
+- Notion → gibt es Vorbereitungs-Notes?
+
+Cross-Over: Wenn Bahn um 07:30 fährt aber erster Termin 08:00 ist → proaktiv vorschlagen "nächste Bahn 07:15 kommt, 10min Puffer für Fußweg zum Hospital".
+
+### Implementierung
+
+**Datei 1: `prompts/tool_manifest.md`** — auto-generiert bei Bot-Start aus `mcp_config.json`:
+
+```markdown
+# Verfügbare Werkzeuge (auto-generiert)
+
+## Kalender (caldav) — Terminmanagement
+- caldav_list_calendars: Alle Kalender auflisten
+- caldav_get_today_events: Termine heute pro Kalender
+- caldav_get_week_events: Wochen-Übersicht
+- caldav_create_event: Neuen Termin (mit Geocoding+ORGANIZER)
+- caldav_update_event: Termin ändern (UID-basiert)
+- caldav_delete_event: Termin löschen
+- caldav_search_events: Suche nach Text/Teilnehmer/Ort
+
+## Wetter — aktuell + Vorhersage
+- get_current_conditions: Jetzt-Wetter
+- get_forecast: Vorhersage N Tage
+
+## Bahn + VRR — Verkehr NRW
+- db_search_connections: 1+4 Verbindungen mit allen Verkehrsmitteln
+- db_departures / db_arrivals: Live-Abfahrten/Ankünfte
+- db_find_station: Station-Suche
+- db_trip_details: Fahrt-Details
+- db_pendler_check: Mülheim↔Dortmund
+- db_train_live_status: Live-Tracking (Gleis, Verspätung)
+- db_nrw_stoerungen: zuginfo.nrw
+
+## Notion — Second Brain
+- search: Volltextsuche
+- read_page / create_page / update_page / append_content / archive_page
+- list_children / get_database / query_database
+- add_entry / update_entry / delete_entry
+
+## Zeit
+- get_current_time: Jetzt (Europe/Berlin)
+- convert_time: Zeitzonen
+
+## Aufgaben (Things3)
+- create_task: Neue Aufgabe
+- list_today: Heute-Liste
+- complete_task: Als erledigt markieren
+
+## Memory
+- memory_read: MEMORY.md lesen
+- memory_write: MEMORY.md aktualisieren
+```
+
+**Datei 2: `prompts/skill_manifest.md`** — initial leer, füllt sich in Phase 2:
+
+```markdown
+# Skills (erlernte Muster)
+
+Noch keine Skills registriert. Wird in Phase 2.7 (Self-Improvement) automatisch gefüllt.
+
+## Template für neue Skills
+
+### Skill-Name
+- **Trigger**: Welche Anfragen aktivieren diesen Skill
+- **Werkzeuge**: Welche Tools werden kombiniert
+- **Pattern**: Konkrete Schritt-für-Schritt-Logik
+- **Erfolgsrate**: Gemessen über N Anwendungen
+```
+
+**Datei 3: System-Prompt-Erweiterung** in `prompts/system.md`:
+
+```markdown
+## Tool-Selbstkenntnis und Proaktivität
+
+Du hast Zugriff auf die in `prompts/tool_manifest.md` gelisteten Werkzeuge und die in `prompts/skill_manifest.md` gelisteten Skills. Bei JEDER komplexen Anfrage:
+
+1. **Frage dich zuerst**: "Welche meiner Werkzeuge passen hier?"
+2. **Denke in Kombinationen**: Nutze mehrere Tools parallel wenn sinnvoll
+3. **Sei proaktiv mit Cross-Over**:
+   - Kalender + Wetter → bei Outdoor-/Reise-Terminen
+   - Bahn + Kalender → bei Terminen außerhalb Mülheims
+   - Notion + Kalender → bei Patienten-/Arbeitsterminen
+   - Things3 + Kalender → bei Deadline-basierten Aufgaben
+   - Bahn + Wetter → bei Pendel-Entscheidungen
+   - Notion + Notion → Cross-Datenbank-Verknüpfungen über Relations
+
+4. **Pro-aktive Hinweise**: Wenn du bei einer Anfrage siehst, dass ein zweites Tool relevant wäre, erwähne es ("Übrigens: morgen regnet es, vielleicht willst du Bahn statt Auto nehmen?").
+
+5. **Grenzen anerkennen**: Wenn ein Tool fehlt das nötig wäre, sage das klar statt zu halluzinieren.
+```
+
+### Aufwand
+
+- Auto-Discovery-Mechanismus: 2-3h (Python-Script, bei Bot-Start mcp_config.json einlesen, Schemas von MCPs abrufen, Manifest generieren)
+- Skill-Manifest-Template: 30 min
+- System-Prompt-Erweiterung: 1h
+- Tests (5 Szenarien mit Cross-Over): 2h
+
+**Gesamt: 1-2 Tage.**
+
+### Warum jetzt (nach 1.5.22)
+
+- **Vor 1.5.4** Session-Store: Skills brauchen evtl. Session-State
+- **Vor Phase 2.7** Self-Improvement: Skills müssen erst als Manifest existieren bevor sie verbessert werden können
+- **Nach 1.5.22** Backend-Protocol: Manifest wird pro Backend unterschiedlich sein (SDK-MCPs vs. API-Tools), muss ins Protocol integriert sein
 
 ---
 
@@ -250,7 +486,35 @@ Entscheidung treffen und in einem ADR dokumentieren:
 
 **Aufwand**: ADR schreiben = 30 Min. Migration `jarvis-caldav` → Docker = 2-3 Stunden (optional, kann auch später).
 
-**Wichtig**: Diese 4 Vorbereitungen machen **nichts langsamer, nichts kaputt, keine Feature-Änderung**. Sie sind Investment in die Zukunft. Phase 2.1-2.5 (Cognee, Dream, Audio) können ohne sie gebaut werden — aber ab Phase 2.6 (Sub-Agents) sind sie nötig.
+### Vorbereitung 5 — API-Migrations-Hook im Protocol (ADR-026)
+
+Das ClaudeBackend-Protocol wird so designed, dass zukünftige Backends (API, Realtime) ohne Refactoring einhängbar sind:
+
+```python
+# core/backends/base.py
+class ClaudeBackend(Protocol):
+    async def start(self) -> None: ...
+    async def shutdown(self) -> None: ...
+    async def process_message(
+        self,
+        user_context: UserContext,
+        session_id: str,
+        user_message: str,
+        system_prompt: str,
+        allowed_tools: list[str] | None = None,  # aus 1.5.10e v2
+        stream: bool = False,                     # für späteres API-Streaming
+    ) -> AsyncGenerator[BackendEvent, None]: ...
+```
+
+**Heute**: SDKBackend implementiert Protocol. `stream=True` wird ignoriert (SDK kann's nicht, ADR-024).
+
+**Später (API-Aktivierung, optional)**: APIBackend nutzt `stream=True` für echtes Token-Streaming. Orchestrator-Code unverändert.
+
+**Noch später (Realtime)**: RealtimeBackend mit WebSocket-Layer. Gleiches Protocol.
+
+**Aufwand zusätzlich zu Vorbereitungen 1-4**: 30 min (nur Interface-Design, keine API-Implementation).
+
+**Wichtig**: Diese 5 Vorbereitungen machen **nichts langsamer, nichts kaputt, keine Feature-Änderung**. Sie sind Investment in die Zukunft. Phase 2.1-2.5 (Cognee, Dream, Audio) können ohne sie gebaut werden — aber ab Phase 2.6 (Sub-Agents) sind sie nötig.
 
 ---
 
@@ -405,9 +669,9 @@ Neda 7. Juli · Hossein 17. Juli · Majid 23. Juli · Taha 21. Oktober
 | # | Feature | Abhängig von | MCP benötigt | Beschreibung |
 |---|---|---|---|---|
 | 2.1 | Cognee | — | — | Mid-term Memory (Knowledge Graph) |
-| 2.2 | Long-term DB | — | SQLite | Persistente Rules, Patterns, Profile |
+| 2.2 | Long-term DB | — | SQLite | Persistente Rules, Patterns, Profile + SQLite MCP Server |
 | 2.3 | Model Selection | — | — | Haiku/Sonnet/Opus dynamisch |
-| 2.4 | Audio-Tagebuch | 2.1 | Whisper | Whisper → Extraktion → Cognee |
+| 2.4 | Audio-Tagebuch | 2.1 | Whisper | Whisper → Extraktion → Cognee + Whisper MCP Server |
 | 2.5 | Dream Phase | 2.1, 2.2 | — | Cron 03:00 + Threshold (>10KB) |
 | 2.6 | Sub-Agents | 2.3 | — | Dynamisch spawnen |
 | 2.7 | Self-Improvement | 2.1, 2.5 | Filesystem | Reflexion Loop + Skill Evolution |
@@ -418,6 +682,8 @@ Neda 7. Juli · Hossein 17. Juli · Majid 23. Juli · Taha 21. Oktober
 | 2.12 | Telegram Mini App | 2.11 | — | PWA in Telegram für Rich UI: Dashboards, Kalender, Task-Board, Settings. Telegram bleibt Chat, Mini App für visuelle Interaktion |
 | 2.13 | Intelligent Document Processing | — | CardDAV, Google Drive | Foto/PDF → automatisch handeln: Dienstplan→Kalender, Visitenkarte→Kontakt, Arztbrief→Notion+Kalender, Rechnung→Google Drive. Claude Vision eingebaut |
 | 2.14 | Personal Vault | — | Google Drive | iCloud↔Google Drive Sync + Google Drive MCP = universeller Dateizugriff. "Schick mir meinen Personalausweis" → sucht in Drive → sendet per Telegram |
+| 2.15 | MCP Welle 2: Kernfunktionen | ⬜ Geplant | 1.5.23 | Maps, DB, Wetter, Search, Reminder, Notion, Gmail, HA |
+| 2.16 | MCP Welle 3: Erweiterungen | ⬜ Geplant | 2.15 | Telegram, Spotify, Twilio, Currency, Exa, Firecrawl, GitHub |
 
 Parallel: HOCH-MCPs einrichten (Gmail, Google Drive, CardDAV, Maps, HA)
 
@@ -426,6 +692,10 @@ Parallel: HOCH-MCPs einrichten (Gmail, Google Drive, CardDAV, Maps, HA)
 ## 9. PHASE 3 — VISION
 
 Weitere Inputs (WhatsApp, iMessage, Voice) · Bildverarbeitung · Voice I/O (Whisper+TTS) · Claude API Migration evaluieren · Medien (Spotify, Apify)
+
+| # | Feature | Beschreibung |
+|---|---|---|
+| 3.5 | MCP: Voice Output (TTS) | Text-to-Speech via ElevenLabs/OpenAI für Telegram Voice |
 
 ---
 
@@ -454,6 +724,29 @@ Async throughout · Kein Hardcoding (.env) · Logging (structlog) · Circuit Bre
 
 ---
 
+## 12a. OPS-NOTES
+
+### Container-Stop vor Reboots
+
+**Standard-Prozedur**: `docker compose stop` vor VPS-Reboots, **nicht** `docker compose down`.
+
+- `stop` — hält Container an, behält Konfiguration/Netzwerke/Volumes. Nach `up -d` sofort wieder da, keine Neuerstellung.
+- `down` — entfernt Container und Netzwerke. Nächstes `up -d` erzeugt alles neu (Container-IDs wechseln, Netzwerk-IPs wechseln, in-memory State verloren, MCP-Warmup läuft komplett von vorne).
+
+Für regelmäßige Restarts (Code-Deploys) bleibt `docker compose up -d --build himes` — das ersetzt nur den einen Service. `down` nur bei strukturellen Änderungen (docker-compose.yml, Netzwerke, Volumes).
+
+### Healthcheck-History
+
+- **Bis 2026-04-17**: `docker-compose.yml` hatte einen `healthcheck`-Block der `curl -f http://localhost:8080/health` auf den Bot feuerte.
+- **2026-04-17**: Block entfernt, weil der Bot keinen HTTP-Server hatte — Container ging in Restart-Loop.
+- **Reaktivierung**: erst wenn Phase 1.5.8 den /health-Endpoint implementiert hat (siehe Status-Tabelle). Reihenfolge strikt: erst Endpoint, dann Healthcheck-Block zurück in compose.
+
+### Uncommitted-VPS-State als Design-Pattern (nicht Bug)
+
+Mehrere Phasen haben historisch Code direkt auf der VPS eingecheckt (nicht via git) und erst später auf Local/GitHub nachgezogen. Das ist dokumentiert in Phase 1.5.21 und hier bewusst akzeptiert — VPS ist Working-Copy, Local ist Canonical Repository, GitHub ist Remote of Record. Bei jedem größeren Update-Zyklus: VPS → Local → GitHub sync.
+
+---
+
 ## 13. ADR (Architektur-Entscheidungen)
 
 | # | Entscheidung | Status |
@@ -466,7 +759,7 @@ Async throughout · Kein Hardcoding (.env) · Logging (structlog) · Circuit Bre
 | 006 | stream-json (programmatisch parsbar) | Aktiv |
 | 007 | System Prompt als externe Datei | Geplant |
 | 008 | Dream Phase: Cron + Threshold | Geplant |
-| 009 | Claude API langfristig evaluieren | Phase 3 |
+| 009 | Claude API langfristig evaluieren | Phase 3 oder früher bei Bedarf, vorbereitet durch ADR-026 |
 | 010 | Time + Filesystem als KRITISCH | Phase 1.5 |
 | 011 | Persistenter CLI-Prozess | Phase 1.5 |
 | 012 | pty.openpty() statt script-Wrapper (kein JSON-Corruption) | Aktiv |
@@ -477,6 +770,15 @@ Async throughout · Kein Hardcoding (.env) · Logging (structlog) · Circuit Bre
 | 017 | DB self-hosted + VRR: derhuerst/db-rest:6 im Docker-Network (Primary) mit v6.db.transport.rest (Fallback). Alle Produkte explizit aktiviert (subway, tram, bus). Journey-Plattformen via departurePlatform/arrivalPlatform. Telegram-optimiertes Output mit Emojis. zuginfo.nrw für NRW-Störungen. Adress-Routing: resolve_location() (Stationen+Adressen+POIs), journeys mit from.type=location für Nicht-Stationen | Aktiv |
 | 018 | Strukturierte Tool-Error-Dicts statt Exception-Propagation: `{ok, error, user_message_hint, retry_suggested, status_code, detail}`. Ersetzt generische "Fehler bei..." Meldungen durch ready-to-use deutsche Hints die Claude verbatim durchreicht → Halluzinations-Reduktion | Aktiv |
 | 019 | Hallucination Guard als Defense-in-Depth: Prompt-Regel (primary) + Regex-Pattern-Guard (safety net). Modulare Domain-Registration (DB, später Kalender/Notion/Weather). Soft-Guard — niemals Text rewriten, nur Disclaimer anhängen + Warning-Log, damit False-Positives nicht UX zerstören | Aktiv |
+| 020 | MCP Wellenmodell: Basis → Kern → Erweiterung statt alles auf einmal | Geplant |
+| 021 | Open-Meteo statt kommerzieller Wetter-API: Kostenlos, kein API-Key, global | Geplant |
+| 022 | PaulvonBerg/db-mcp-server für DB: Python, umfassender, Cloud-ready | Geplant |
+| 023 | Claude Code CLI/SDK bleibt Primär-Backend (nicht API) wegen Testing-Kosten. Abo-basiert unbegrenzt, API wird nur bei Bedarf als Zweit-Backend gehängt. Revision in 6 Monaten oder bei Voice-Bedarf. | Aktiv |
+| 024 | SDK-Streaming-Limit: `claude-agent-sdk==0.0.25` aggregiert TextBlocks, keine Token-Deltas. Event-Log-Analyse 2026-04-18: finale TextBlocks kommen 88-300ms vor Response-Ende als Ein-Block. Token-Streaming erst mit API-Migration (ADR-009) möglich. | Aktiv |
+| 025 | Tool-Progress-Updates statt Token-Streaming (Phase 1.5.10f): Bei ToolUseBlock-Events editierbare Status-Nachricht in Telegram. Ersetzt ursprünglichen 1.5.10f-Plan (durch ADR-024 nicht realisierbar). Optional, nach 1.5.22 + 1.5.26. | Geplant |
+| 026 | ClaudeBackend-Protocol als Pflicht-Vorbereitung (Phase 1.5.22): Protocol so designed, dass CLI/API/Realtime als austauschbare Backends implementierbar sind. Spätere Migration = Feature-Flag, kein Refactoring. Kritischer Pfad vor 1.5.4 und 1.5.2. | Geplant |
+| 027 | Tool-Whitelist als Latenz + Security-Strategie (Phase 1.5.10e v2): `allowed_tools` in ClaudeCodeOptions (v2a) + ENABLE_TOOL_SEARCH=false (v2b). Ergebnis: -1-2s Latenz + harte Security-Absicherung (CronCreate/Bash/Edit physisch ausgeschlossen). Commits 15da656 + 3c316b2. | Aktiv |
+| 028 | Tool-Manifest + Proaktivitäts-Regel (Phase 1.5.26): Jarvis hat aktive Selbstkenntnis über Werkzeuge + Skills, kombiniert proaktiv Cross-Over (Kalender+Wetter, Bahn+Kalender, etc.). Auto-generiert aus mcp_config.json. Fundament für Phase 2.7. | Geplant |
 
 ---
 
@@ -691,6 +993,77 @@ Status in docs/MASTER-REFERENCE.md updaten.
 Regeln: Async, Logging, .env-konfigurierbar.
 ```
 
+### Phase 1.5.22 — ClaudeBackend-Protocol mit API-Migrations-Vorbereitung
+```
+Lies docs/MASTER-REFERENCE.md. Du bist Lead Developer für HiMeS.
+Task: Phase 1.5.22 — ClaudeBackend-Protocol + MCP-Kategorisierung + Deployment-Standard.
+
+Ziel: Architektur so vorbereiten, dass späterer Switch zu API/Hybrid/Realtime ohne Refactoring möglich ist. Siehe Sektion 2a + 1b + 1c + ADR-026.
+
+Scope:
+1. ClaudeBackend-Protocol (core/backends/base.py) — abstraktes Interface
+2. SDKBackend (core/backends/sdk_backend.py) — aktueller SDKClient adaptiert
+3. APIBackend (core/backends/api_backend.py) — NUR Stub mit Interface, NICHT implementieren
+4. UserContext-Dataclass durchreichen
+5. MCP-Kategorisierung in mcp_config.json (core/personal/transport/home)
+6. ADR-026 schreiben (docs/adr/026-backend-protocol.md)
+
+Scope NICHT drin:
+- Tatsächliche API-Implementation
+- MCP-Bridge für API (später)
+- Code-Änderungen an MCPs selbst
+
+Aufwand: ~1 Woche. Kritischer Pfad vor 1.5.26 und 1.5.4.
+```
+
+### Phase 1.5.26 — Tool-Manifest + Proaktivitäts-Regel
+```
+Lies docs/MASTER-REFERENCE.md. Du bist Lead Developer für HiMeS.
+Task: Phase 1.5.26 — Tool-Manifest + Proaktivitäts-Regel.
+
+Ziel: Jarvis bekommt aktive Selbstkenntnis über Werkzeuge und Skills, kombiniert proaktiv Cross-Over bei komplexen Anfragen. Siehe Sektion 1d + ADR-028.
+
+Scope:
+1. Auto-Discovery-Script (core/tool_manifest_generator.py) — liest bei Bot-Start mcp_config.json + MCP-Schemas, generiert prompts/tool_manifest.md
+2. prompts/skill_manifest.md — initial leeres Template mit Struktur
+3. prompts/system.md erweitern — Proaktivitäts-Regel + Cross-Over-Beispiele + Tool-Manifest-Referenz
+4. Settings-Flag TOOL_MANIFEST_AUTO_UPDATE: bool = True (Default)
+5. Tests: 5 Cross-Over-Szenarien (Kalender+Wetter, Bahn+Kalender, Notion+Kalender, Things3+Kalender, Bahn+Wetter)
+6. ADR-028 schreiben
+
+Scope NICHT drin:
+- Skill-Befüllung (kommt in Phase 2.7)
+- Automatische Skill-Erkennung aus Nutzung (Phase 2.7)
+
+Reihenfolge: NACH 1.5.22 (weil Manifest ins Backend-Protocol integriert wird), VOR 1.5.4.
+
+Aufwand: 1-2 Tage.
+```
+
+### Phase 1.5.25 — Wochentag-Halluzinations-Schutz (Mini-Ticket)
+```
+Lies docs/MASTER-REFERENCE.md Sektion 1b (Musikschule-Bug).
+
+Task: Wochentag-Halluzinations-Schutz.
+
+Minimal-Scope:
+1. System-Prompt-Regel ergänzen: "Bei Wochentag-Angabe aus einem Datum IMMER time-MCP convert_time nutzen, NIE aus dem Kopf berechnen"
+2. Beispiel einbauen: "2026-04-24 → time-MCP fragen → 'Freitag', nie raten"
+3. Optional: HallucinationGuard-Pattern für Wochentag-Claims ohne vorhergehenden time-MCP-Call
+
+Aufwand: 15-30 Min.
+```
+
+---
+
+## 15a. OFFENE FRAGEN
+
+- [ ] Google Maps API Key: Welches Billing-Modell?
+- [ ] Deutsche Bahn API: Client-ID beantragen bei developers.deutschebahn.com
+- [ ] Home Assistant: Cloudflare Tunnel oder direkte Anbindung?
+- [ ] Notion MCP: Integration Token erstellen
+- [ ] MCP Gateway: Brauchen wir einen zentralen MCP-Proxy bei >10 Servern?
+
 ---
 
 ## 15. CHANGELOG
@@ -724,6 +1097,9 @@ Regeln: Async, Logging, .env-konfigurierbar.
 | 2026-04-16 | 22 | DB Nominatim-Geocoding: HAFAS löste Adressen falsch auf (Otto-Pankok-Schule→Schule Blücherstr., Am Rathaus→Rathausmarkt). Fix: Nominatim-Geocoding (wie CalDAV) in resolve_location() integriert. _looks_like_station() Heuristik: Station-Keywords→HAFAS, Adress-Keywords (Schule/Straße/Hospital/Klinik)→Nominatim, Ziffern→Nominatim. _geocode_nominatim() async via run_in_executor, Mülheim als Default-Stadt-Kontext, _location_cache. _set_location_params() mit from.address statt from.name, keine Fake-IDs an HAFAS. |
 | 2026-04-16 | 23.1 | Phase 1.5.20 Follow-up: 3 Edge-Cases gefixt nach Telegram-Test. DB-FIX-5a (Guard _is_near_negation erkennt Refusal-Kontext "kein Tool"/"empfehle App" → kein False-Positive-Disclaimer mehr), DB-FIX-5b (SYSTEM_PROMPT listet alle 9 DB-Tools mit vollem mcp__deutsche-bahn__-Präfix + Anweisung "nicht deferred, IMMER direkt aufrufen, kein ToolSearch" — Root Cause: Claude nutzte ToolSearch wenn MCP-Status "pending", fand nichts, halluzinierte "kein Tool"), DB-FIX-5c (_is_remark_relevant(final_destination=...) droppt "zwischen X und Y" wenn eine Station = final destination und andere off-route = downstream). +10 Tests. |
 | 2026-04-16 | 23.2 | DB-FIX-6 (Pending-MCP Race + Global Refusal Short-Circuit): DB-FIX-6a — Guard Tier-1 `_GLOBAL_REFUSAL_MARKERS` Short-Circuit (Text mit "nicht verfügbar"/"DB Navigator App"/"ohne live-verifikation" etc. → ganze Message = Refusal → skip alle Domain-Checks). Löst S3-Refusal mit 3× Mention wo letzte außerhalb ±150-Zeichen-Fenster war. DB-FIX-6b — `ClaudeResponse.pending_mcps` Feld in claude_subprocess.py, Orchestrator Auto-Retry wenn (pending_mcps + 0 tool_calls + refusal-text via `_TOOL_REFUSAL_MARKERS`) → 2s Pause + fresh Session. Transparente Lösung für MCP-Race-Condition bei erstem Call. +3 Tests (94/94 Docker). |
+| 2026-04-19 | 29.1 | Backlog-Items aus 17.04-Incident nachgetragen. (a) Phase 1.5.8 Health Monitoring präzisiert: ZUERST /health-Endpoint in core.orchestrator (aiohttp Port 8080), DANN healthcheck-Block in docker-compose.yml reaktivieren. Reihenfolge kritisch — der Block war am 17.04. entfernt worden weil Bot keinen HTTP-Server hatte, sonst Container-Restart-Loop. (b) Neue Phase 1.5.27 Tool-Loop-Guard im Orchestrator (mittlere Priorität, nach 1.5.4): identische Tool-Args >2× im selben Turn → synthetisches Error-Result statt Wiederholung. Beleg aus 17.04-Log: caldav_get_today_events 11× hintereinander in einem Turn. (c) Neue Phase 1.5.28 things-mcp Härtung (niedrige Priorität, nach 1.5.3): Input-Sanitization Unicode-Control-Chars + Date-Format-Validation + Dry-Run-Mode, wartet auf Cultured Code Support. (d) Neue Sektion 12a OPS-NOTES: `docker compose stop` vs `down` Semantik, Healthcheck-History, Uncommitted-VPS-State als akzeptiertes Design-Pattern. Reihenfolge-Zeile erweitert um 1.5.27 + 1.5.28. |
+| 2026-04-19 | 29 | Strategische Neuausrichtung + Phase 1.5.10e v2 Abschluss. Vier parallele Stränge: (a) Phase 1.5.10e v2 deployed — v2a allowed_tools-Whitelist (Commit 15da656) + v2b ENABLE_TOOL_SEARCH=false (Commit 3c316b2). ToolSearch komplett eliminiert, -1-2s pro Anfrage on top von v2a's eager-schema-loading. Gesamt-Latenz-Verbesserung seit 1.5.10d: -20 bis -77% je Szenario. Tool-heavy (CalDAV/Notion) limitiert durch externe APIs, nicht mehr durch ToolSearch. (b) SDK-Streaming-Limit bestätigt durch Event-Log-Analyse von 5 realen Anfragen — claude-agent-sdk==0.0.25 aggregiert TextBlocks, keine Token-Deltas (finale Blocks kommen 88-300ms vor Response-Ende). Token-Streaming erst mit API-Migration möglich (ADR-024). (c) Strategie-Entscheidung: CLI/SDK bleibt Primär-Backend (Abo-gedeckt, Testing unbegrenzt, 0€ API-Kosten). API wird bei Bedarf als Zweit-Backend eingehängt (ADR-023). Phase 1.5.22 wird kritischer Pfad vor 1.5.4/1.5.2. (d) Phase 1.5.10f umgedeutet von Token-Streaming → Tool-Progress-Updates (ADR-025). Neue Phasen 1.5.25 (Wochentag-Halluzination, 15-30min Mini-Ticket nach Musikschule-Bug am 18.04) und 1.5.26 (Tool-Manifest + Proaktivitäts-Regel, 1-2 Tage, Fundament für Phase 2.7). Neue ADRs 023-028. Neue Sektionen 1b (Strategische Neuausrichtung), 1c (Kosten-Strategie + Voice-Pfad), 1d (Phase 1.5.26 Detail-Spezifikation), 2a Vorbereitung 5 (API-Migrations-Hook im Protocol). Neue Prompt-Templates 1.5.22, 1.5.26, 1.5.25. |
+| 2026-04-17 | 28 | +MCP Erweiterungsplan (25 Server, 4 Wellen), +Phase 2.15/2.16, +Phase 1.5.23/1.5.24, +Phase 3.5, +ADR-020/021/022, +MCP Tabelle erweitert |
 | 2026-04-17 | 27 | Phase 1.5.21 ✅: CalDAV Stabilität. Debugged ausgehend von User-Report "Bot hängt bei Termin-Abfrage". Drei unabhängige Bugs im caldav-mcp Repo (separates Projekt, bisher ungetracktes Basis-Fork von madbonez) identifiziert und behoben. (a) **Starlette-SSE-Route** (commit 3802c56): handle_sse() gab None zurück, Starlette 0.50 erwartet aber Response-Objekt → TypeError bei jedem /sse Request (604 Exceptions in 2 Tagen Laufzeit). Der Bug war tolerierbar solange mcp-remote (im Bot-Container) eine einmal etablierte SSE-Session poolte — brach aber bei jedem docker compose up --build. Fix: `return Response()` nach connect_sse-Block + debug=False. (b) **Ungetrackte Phase-1.5.15-Extensions** (commit 93608f1): 420 Zeilen Nominatim-Geocoding + update_event-Tool + ORGANIZER-Feld waren seit April 13 im VPS working-tree uncommitted — gingen fast verloren beim Debug. Gesichert als eigener commit bevor weitergearbeitet wurde. (c) **keepalive timeout** (commit 86ce5e3): Apple iCloud schließt idle HTTP-keepalives nach ~60-90s; niquests connection pool merkt's erst beim nächsten Request → hard ConnectionError. Retry-Decorator `@retry_on_stale_connection` auf 9 Apple-facing CalDAVClient-Methoden (list_calendars, create_event, get_events, get_today_events, get_week_events, get_event_by_uid, update_event, delete_event, search_events). Walkt Exception-Chain nach NiquestsConnectionError oder Substring-Markers (keepalive timeout, connection reset, remote end closed, …). Diskriminiert von 401/404/ValueError die unverändert durchgereicht werden. connect() bewusst NICHT dekoriert (Loop-Risiko). (d) **Prozess-Management**: jarvis-caldav.service (systemd, Port 8001) als einziger Persistenz-Mechanismus — mit Auto-Restart bei pkill. Caddy proxyed https://caldav-ahsan.duckdns.org/sse → localhost:8001. **Tests**: 95 Unit-Tests grün (86 alt + 9 neu in tests/test_retry.py) + 1 E2E-Smoke-Test in tests/e2e/test_stale_reconnect_e2e.py (NiqConnError-Injection via monkey-patch der principal.calendars). **Live-Verifikation**: Stale-Path mit injiziertem NiqConnError getriggert → Log zeigte "stale_connection_detected → reconnect (635ms) → retrying → OK 1.44s gesamt". **Offen**: caldav-mcp remote ist upstream madbonez Fork, 4 neue Commits liegen nur auf VPS — entweder eigenes GitHub-Fork anlegen oder lokaler Mirror manuell syncen. | |
 | 2026-04-16 | 26 | Phase 1.5.10e REVERTED: Versuch ENABLE_TOOL_SEARCH=false via ClaudeCodeOptions.env zu setzen (offizieller Anthropic-Switch bei <10 Tools empfohlen; wir haben ~25 auf 6 MCPs). Messung: Things 22s→8.5s (-13.5s, super), Zug ähnlich (17.6s→22.7s, Varianz), aber CalDAV produzierte User-sichtbare "Verbindungsunterbrechung"-Fehlermeldungen obwohl Tools laut Log aufgerufen wurden (caldav_list_calendars ×2, caldav_create_event ×2 = Claude-Retries nach Error-Response). Remote-Server HTTP 200, Kausalität ungeklärt — möglicherweise MCP-Handshake-Race mit dem Tool-Search-Disable. Laut Task-Regel "Qualität > Speed → REVERT" env-Setting entfernt. Latenz-Reduktion bei Things wäre attraktiv (60% weniger), aber nur mit CalDAV-Stabilität verhandelbar. Offen für 2. Anlauf mit explizitem allowed_tools whitelist statt Env-Var. | |
 | 2026-04-16 | 25 | Phase 1.5.10 ✅: Latenz-Optimierung komplett. (a) Telegram Typing-Indikator als async Task der alle 4s send_action("typing") ruft, gestoppt im finally (telegram_adapter.py). (b) Pre-Classification: regex-basierte _INSTANT_REPLIES für Grüße/Danke/Bestätigungen (^...$ Anker) umgehen Claude komplett — "hallo", "danke", "ok" antworten <100ms ohne API-Call. (c) claude-code-sdk Integration: neuer core/sdk_client.py mit persistentem Singleton ClaudeSDKClient (connect einmal beim Bot-Start, alle Messages nutzen denselben warmen Subprocess). Feature-Flag CLAUDE_USE_SDK_CLIENT (default true). Orchestrator ruft _send_to_claude() → SDK zuerst, bei SUBPROCESS_CRASH oder Exception transparenter Fallback auf ClaudeSubprocess (unverändert). Retries gehen immer über robusten Subprocess-Pfad. Zwei post-deploy Fixes: (1) date.today()-Vergleich statt Prompt-String-Vergleich — verhinderte ~4.3s-Reconnect pro Minute weil Uhrzeit im Prompt drin war. (2) ResultMessage.result als Source of Truth statt akkumulierter TextBlocks — verhinderte Claude's Denk-Zwischentexte ("Ich lade zuerst das Tool-Schema...") in der Antwort. Monkey-Patch für SDK-0.0.25-Bug (rate_limit_event). Gemessen: erste Nachricht ~30s (MCP Cold-Start), Folge-Nachrichten ~15s, kurze Frage ohne Tool ~4s. Session-Continuity bestätigt (test_sdk_v2.py: Claude erinnerte "42" über 4 Nachrichten). Alle 6 MCPs verifiziert (caldav, weather, things3, time, deutsche-bahn, himes-tools/notion+memory), keine Funktionsregression. |
