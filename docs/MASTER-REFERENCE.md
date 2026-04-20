@@ -1,5 +1,5 @@
 # HiMeS — MASTER REFERENCE
-> **Version:** v25.6 · **Stand:** 2026-04-20 · **Pfad:** `docs/MASTER-REFERENCE.md`
+> **Version:** v25.7 · **Stand:** 2026-04-20 · **Pfad:** `docs/MASTER-REFERENCE.md`
 > **Nutzung:** `Lies docs/MASTER-REFERENCE.md und fahre fort mit Phase [X.Y]: [Task].`
 > **Nach Task:** Status in dieser Datei updaten + committen.
 
@@ -849,6 +849,37 @@ Strategie: Cloudflare Tunnel statt DuckDNS/Nabu Casa.
 
 **.env-Variable (Phase 1.5.33)**: `HA_MCP_URL` — URL des ha-mcp-Endpoints via Cloudflare Tunnel. Format: `https://himes-home.uk/private_<REDACTED>` (pending bis Domain + Tunnel aktiv).
 
+### Tool-Errors strukturieren, nicht raisen
+
+Erkenntnis aus Phase 1.5.20 (DB-FIX-1): Wenn Tool-Funktionen bei Fehlern Exceptions werfen oder unstrukturierte Error-Strings zurückgeben, halluziniert Claude die Error-Meldungen (z.B. "MCP-Server getrennt" wurde von Claude erfunden, war nirgends hardcoded).
+
+**Pattern für alle MCP-Tools**:
+```python
+# Statt Exception raisen:
+return {
+    "ok": False,
+    "error": "connection_timeout",
+    "user_message_hint": "⚠️ Deutsche Bahn API aktuell nicht erreichbar. "
+                          "Bitte gleich nochmal versuchen.",
+    "retry_suggested": True,
+    "status_code": 503,
+    "detail": "Timeout nach 8s bei /journeys"
+}
+```
+
+Claude übernimmt `user_message_hint` wortwörtlich → keine Halluzinationen, konsistente UX. Gilt für `himes_db`, `himes_mcp`, zukünftige eigene MCPs. Siehe ADR-018 + ADR-019.
+
+### Python-Version: Lokal 3.9 vs Docker 3.11
+
+Development-Umgebung von Majid hat Python 3.9 systemweit. HiMeS-Docker-Container nutzt 3.11. Das `mcp`-SDK braucht Python 3.10+.
+
+**Konsequenzen**:
+- Tests die `match`-Statement oder 3.10+-Syntax nutzen: conditional skippen via `pytest.mark.skipif(sys.version_info < (3, 10))`
+- Für lokales Testen: Docker-Container nutzen (`docker compose exec himes pytest`) statt lokal `pytest`
+- Bei neuen Features: 3.10+-Syntax OK, aber explizit in Test-Setup dokumentieren
+
+**Alternativ**: Lokal `pyenv` mit 3.11 einrichten. Noch nicht gemacht, Priorität niedrig (Docker-Tests reichen).
+
 ---
 
 ## 13. ADR (Architektur-Entscheidungen)
@@ -1206,6 +1237,7 @@ Aufwand: 15-30 Min.
 | 2026-04-16 | 22 | DB Nominatim-Geocoding: HAFAS löste Adressen falsch auf (Otto-Pankok-Schule→Schule Blücherstr., Am Rathaus→Rathausmarkt). Fix: Nominatim-Geocoding (wie CalDAV) in resolve_location() integriert. _looks_like_station() Heuristik: Station-Keywords→HAFAS, Adress-Keywords (Schule/Straße/Hospital/Klinik)→Nominatim, Ziffern→Nominatim. _geocode_nominatim() async via run_in_executor, Mülheim als Default-Stadt-Kontext, _location_cache. _set_location_params() mit from.address statt from.name, keine Fake-IDs an HAFAS. |
 | 2026-04-16 | 23.1 | Phase 1.5.20 Follow-up: 3 Edge-Cases gefixt nach Telegram-Test. DB-FIX-5a (Guard _is_near_negation erkennt Refusal-Kontext "kein Tool"/"empfehle App" → kein False-Positive-Disclaimer mehr), DB-FIX-5b (SYSTEM_PROMPT listet alle 9 DB-Tools mit vollem mcp__deutsche-bahn__-Präfix + Anweisung "nicht deferred, IMMER direkt aufrufen, kein ToolSearch" — Root Cause: Claude nutzte ToolSearch wenn MCP-Status "pending", fand nichts, halluzinierte "kein Tool"), DB-FIX-5c (_is_remark_relevant(final_destination=...) droppt "zwischen X und Y" wenn eine Station = final destination und andere off-route = downstream). +10 Tests. |
 | 2026-04-16 | 23.2 | DB-FIX-6 (Pending-MCP Race + Global Refusal Short-Circuit): DB-FIX-6a — Guard Tier-1 `_GLOBAL_REFUSAL_MARKERS` Short-Circuit (Text mit "nicht verfügbar"/"DB Navigator App"/"ohne live-verifikation" etc. → ganze Message = Refusal → skip alle Domain-Checks). Löst S3-Refusal mit 3× Mention wo letzte außerhalb ±150-Zeichen-Fenster war. DB-FIX-6b — `ClaudeResponse.pending_mcps` Feld in claude_subprocess.py, Orchestrator Auto-Retry wenn (pending_mcps + 0 tool_calls + refusal-text via `_TOOL_REFUSAL_MARKERS`) → 2s Pause + fresh Session. Transparente Lösung für MCP-Race-Condition bei erstem Call. +3 Tests (94/94 Docker). |
+| 2026-04-20 | 32 | OPS-NOTES ergänzt aus Phase 1.5.20 Debrief: (a) Tool-Error-Strukturierung als Halluzinations-Prävention (Lehre aus DB-FIX-1). (b) Python-Version-Mismatch 3.9/3.11 dokumentiert (mcp-SDK braucht 3.10+). Beide als OPS-Pattern für zukünftige MCP-Entwicklung. |
 | 2026-04-20 | 31 | **Parallel-Chat-Sync (HA-MCP + MCP-Recherche).** (a) Phase 1.5.33 Home Assistant MCP Integration neu angelegt (🔶 In Progress): ha-mcp Add-on auf HA Green installiert (86 Tools in 34 Modulen), Claude Desktop via mcp-proxy verbunden, VPS-Integration pending — wartet auf Cloudflare-Domain (himes-home.uk) + Tunnel. (b) Phase 1.5.9 umbenannt Brave Search → Tavily+Exa (Brave kein Free Tier mehr seit Feb 2026). (c) MCP-Katalog präzisiert: konkrete Package-Namen für Weather (`@dangahagan/weather-mcp`), Gmail (`ArtyMcLabin/Gmail-MCP-Server`, 🔶 pausiert wegen Security-Review), Google Maps (`modelcontextprotocol/server-google-maps` offiziell Anthropic, 🔶 pausiert wegen Billing-Account). (d) Neue Verworfen-Sektion: Apple Reminders (VPS-inkompatibel), Apple Maps (keine strukturierten Daten), Brave Search (kein Free Tier), Perplexity (Kostenmodell inkompatibel mit ADR-023). (e) Eigener DB-MCP auf transport.rest als Phase 2.17 angelegt (2-3 Wochen Aufwand, nach Phase 1.5-Abschluss). (f) ADR-032 (ha-mcp-Wahl) + ADR-033 (Tavily+Exa statt Brave). (g) OPS-NOTES: Home-Assistant-Remote-Zugriff-Strategie (Cloudflare Tunnel, Secret Path in .env nicht committed). |
 | 2026-04-20 | 30 | Phase 1.5.28 Schicht 1: things-mcp reaktiviert nach Cultured Code Cloud-Cleanup (Ticket vom 2026-04-17 beantwortet, vergiftete History-Indices bereinigt; initial sync nach Reaktivierung: 2 changes). `docker start things-mcp` + `restart=unless-stopped`. HiMeS-Bot restart. 4 manuelle Test-Szenarien erfolgreich (2 reads: `things_list_today/inbox/anytime/upcoming/completed`; 2 writes: "einkaufen" als ASCII + "neda anrufen morgen" mit Datum-Tool-Berechnung via `time__get_current_time`+`himes-tools__add_days`). things-mcp-Log zeigt beide Writes als saubere `action=0` (neue Tasks, Indices 7402+7403), keine Rapid-Fire-Schleife wie am 17.04 (damals 7× `action=1` auf selbe UUID in 2s). Tasks in Things3-App auf Mac+iPhone sichtbar, keine Crashes. Schicht 2 (Härtung: Input-Sanitization, Unicode-Filter, Dry-Run-Mode) weiterhin offen, Priorität niedrig solange keine neuen Incidents. |
 | 2026-04-20 | 29.3 | Post-Deploy User-Testing der 2026-04-19-Kalender-Session dokumentiert in Sektion 1e. Core-Bugs bestätigt weg (verschobene Musikschule sichtbar, "nächste Musikschule Fr 24.04", Wochentags-Labels Mo-So konsistent). Zwei Drift-Muster bestätigt die 1.5.32 erzwingen: Event-zu-Tag-Drift (5 Mi-Events unter Di gelandet) + Historische-Recap-Halluzination (Pilates: alle 5 Daten als Dienstag annotiert, alle sind Mittwoch; tool_calls=1, `get_weekday_for_date` nicht aufgerufen trotz Pflicht-Regel). Guard-Disclaimer fiel korrekt in beiden Fällen. 1.5.32 Status-Zeile auf **PFLICHT** präzisiert mit konkreter Scope-Definition aus Test-Befunden. Kein Code-Change. |
