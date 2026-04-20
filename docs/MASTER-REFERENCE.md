@@ -1,5 +1,5 @@
 # HiMeS — MASTER REFERENCE
-> **Version:** v25.9 · **Stand:** 2026-04-20 · **Pfad:** `docs/MASTER-REFERENCE.md`
+> **Version:** v25.10 · **Stand:** 2026-04-20 · **Pfad:** `docs/MASTER-REFERENCE.md`
 > **Nutzung:** `Lies docs/MASTER-REFERENCE.md und fahre fort mit Phase [X.Y]: [Task].`
 > **Nach Task:** Status in dieser Datei updaten + committen.
 
@@ -779,6 +779,28 @@ Neda 7. Juli · Hossein 17. Juli · Majid 23. Juli · Taha 21. Oktober
 | 2.16 | MCP Welle 3: Erweiterungen | ⬜ Geplant | 2.15 | Telegram, Spotify, Twilio, Currency, Exa, Firecrawl, GitHub |
 | 2.17 | Eigener DB-MCP (transport.rest) | 1.5.19 | — | Erweiterung des aktuellen self-hosted `db-rest` (PaulvonBerg). Eigener MCP auf `transport.rest`-API für erweitertes A→B-Routing mit Geo-Awareness, Multi-Modal-Alternativen und Deutschland-weiter Verkehrsintegration. NACH Phase 1.5-Abschluss. Aufwand geschätzt 2-3 Wochen. |
 
+### Phase 2.1 — Cognee-Evaluierung (2026-04-15)
+
+Cognee läuft auf VPS als Docker Container:
+- Image: `cognee/cognee:latest`, Port 8000
+- Keine GPU nötig, 2-4 GB RAM reichen
+- Nutzt Claude API für Extraktion (Haiku, kostengünstig)
+- Nativer MCP Server: `cognee-mcp`
+- 4 Operationen: `remember`/`recall`/`forget`/`improve`
+- Session-Memory eingebaut (`session_id`-Parameter)
+
+Integration-Abhängigkeitskette: Phase 1.5.6 (MEMORY.md) → 1.5.4 (Session-Cleanup) → 2.1 (Cognee) → 2.5 (Dream Phase). Nicht vor Phase 2.1 aktivieren — Cognee braucht Session-State als Input.
+
+### Phase 2.13 — Use-Case: WebUntis-Integration (Tahas Stundenplan)
+
+Kein fertiger MCP verfügbar (Stand 2026-04-16). Drei Optionen für zukünftige Implementierung:
+
+1. **iCal-Export → CalDAV-Abo**: Einfachste Option, WebUntis bietet iCal-URL pro Schüler. Abo in iCloud-Kalender, dann via bestehendem CalDAV-MCP sichtbar. **Vermutlich ausreichend**, Phase 2.13 nicht nötig.
+2. **Eigener Untis-MCP**: Basierend auf `python-webuntis` Library. Aufwand ~1 Woche, nur wenn Phase-2-Skills mehr als nur Lesen brauchen.
+3. **Foto via Vision**: Stundenplan-Foto → Claude Vision → Notion. Teil von Phase 2.13 IDP. Weniger reliable als iCal, aber ohne MCP-Overhead.
+
+Empfehlung: Option 1 (iCal) zuerst probieren, bei Bedarf eskalieren.
+
 Parallel: HOCH-MCPs einrichten (Gmail, Google Drive, CardDAV, Maps, HA)
 
 ---
@@ -801,6 +823,19 @@ Weitere Inputs (WhatsApp, iMessage, Voice) · Bildverarbeitung · Voice I/O (Whi
 **Reflexion Loop:** Erfolg → Metriken updaten. Fehlschlag → Prompt rewriten. Kein Match → neuen Skill erstellen.
 **Skill Router:** Wählt nach Verhalten (nicht Semantik), lernt aus Feedback.
 **Dream Phase:** Nächtlich Skills mit niedriger Rate überarbeiten, neue Patterns konsolidieren.
+
+### Skills-Aktivierungs-Kette
+
+Phase 2.7 Self-Improvement braucht als Voraussetzungen in dieser Reihenfolge:
+
+1. **Phase 1.5.5**: Filesystem-MCP (Skills als Dateien lesen/schreiben)
+2. **Phase 1.5.7**: System-Prompt extern in `prompts/system.md` (damit Prompt-Teile durch Skills ergänzt werden können)
+3. **Phase 1.5.6**: MEMORY.md Init (Skills brauchen Context aus Memory)
+4. **Phase 1.5.4**: Session-Cleanup (Skill-State braucht Session-Boundary)
+5. **Phase 2.1**: Cognee (Skills generieren neue Memories)
+6. **Phase 2.7**: Self-Improvement aktiv
+
+Reihenfolge strikt einhalten — vorzeitige Aktivierung führt zu Skill-State-Korruption.
 
 ---
 
@@ -1275,6 +1310,7 @@ Aufwand: 15-30 Min.
 | 2026-04-16 | 22 | DB Nominatim-Geocoding: HAFAS löste Adressen falsch auf (Otto-Pankok-Schule→Schule Blücherstr., Am Rathaus→Rathausmarkt). Fix: Nominatim-Geocoding (wie CalDAV) in resolve_location() integriert. _looks_like_station() Heuristik: Station-Keywords→HAFAS, Adress-Keywords (Schule/Straße/Hospital/Klinik)→Nominatim, Ziffern→Nominatim. _geocode_nominatim() async via run_in_executor, Mülheim als Default-Stadt-Kontext, _location_cache. _set_location_params() mit from.address statt from.name, keine Fake-IDs an HAFAS. |
 | 2026-04-16 | 23.1 | Phase 1.5.20 Follow-up: 3 Edge-Cases gefixt nach Telegram-Test. DB-FIX-5a (Guard _is_near_negation erkennt Refusal-Kontext "kein Tool"/"empfehle App" → kein False-Positive-Disclaimer mehr), DB-FIX-5b (SYSTEM_PROMPT listet alle 9 DB-Tools mit vollem mcp__deutsche-bahn__-Präfix + Anweisung "nicht deferred, IMMER direkt aufrufen, kein ToolSearch" — Root Cause: Claude nutzte ToolSearch wenn MCP-Status "pending", fand nichts, halluzinierte "kein Tool"), DB-FIX-5c (_is_remark_relevant(final_destination=...) droppt "zwischen X und Y" wenn eine Station = final destination und andere off-route = downstream). +10 Tests. |
 | 2026-04-16 | 23.2 | DB-FIX-6 (Pending-MCP Race + Global Refusal Short-Circuit): DB-FIX-6a — Guard Tier-1 `_GLOBAL_REFUSAL_MARKERS` Short-Circuit (Text mit "nicht verfügbar"/"DB Navigator App"/"ohne live-verifikation" etc. → ganze Message = Refusal → skip alle Domain-Checks). Löst S3-Refusal mit 3× Mention wo letzte außerhalb ±150-Zeichen-Fenster war. DB-FIX-6b — `ClaudeResponse.pending_mcps` Feld in claude_subprocess.py, Orchestrator Auto-Retry wenn (pending_mcps + 0 tool_calls + refusal-text via `_TOOL_REFUSAL_MARKERS`) → 2s Pause + fresh Session. Transparente Lösung für MCP-Race-Condition bei erstem Call. +3 Tests (94/94 Docker). |
+| 2026-04-20 | 35 | Architektur-Notizen aus Strategie-Chat (v6-v24) nachgetragen: (a) Cognee-Evaluierung bei Phase 2.1 (Docker, 2-4GB RAM, cognee-mcp existiert, 4 Operationen). (b) Skills-Abhängigkeitskette bei Phase 2.7 (6 Phasen-Reihenfolge dokumentiert). (c) WebUntis-Integration als optionaler Use-Case bei 2.13 (3 Optionen: iCal/MCP/Vision, Empfehlung iCal). |
 | 2026-04-20 | 34 | OPS-NOTES aus Phase-1.5.10/1.5.21-Debrief ergänzt: (a) Ad-hoc-Scripts dürfen nicht stdlib überschatten (rare Bug). (b) Zombie-Prozesse bei systemd-Migration via `pkill -9` beenden (relevant für Phase 1.5.22 jarvis-caldav-Migration). (c) SDK-Usage ClaudeSDKClient vs query() dokumentiert (GitHub Issue #34). |
 | 2026-04-20 | 33 | Neue Phase 1.5.34 (Telegram Attribution in Replies) aus Phase-1.5.20-Debrief-Chat: UX-Verbesserung, Trigger-Quelle in Bestätigungen mitschicken. Motivation: Things-3-Crash-Incident, Majid wollte Autonomie-Level klarer sehen können. |
 | 2026-04-20 | 32 | OPS-NOTES ergänzt aus Phase 1.5.20 Debrief: (a) Tool-Error-Strukturierung als Halluzinations-Prävention (Lehre aus DB-FIX-1). (b) Python-Version-Mismatch 3.9/3.11 dokumentiert (mcp-SDK braucht 3.10+). Beide als OPS-Pattern für zukünftige MCP-Entwicklung. |
