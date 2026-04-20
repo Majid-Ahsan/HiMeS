@@ -1,5 +1,5 @@
 # HiMeS — MASTER REFERENCE
-> **Version:** v25.8 · **Stand:** 2026-04-20 · **Pfad:** `docs/MASTER-REFERENCE.md`
+> **Version:** v25.9 · **Stand:** 2026-04-20 · **Pfad:** `docs/MASTER-REFERENCE.md`
 > **Nutzung:** `Lies docs/MASTER-REFERENCE.md und fahre fort mit Phase [X.Y]: [Task].`
 > **Nach Task:** Status in dieser Datei updaten + committen.
 
@@ -881,6 +881,43 @@ Development-Umgebung von Majid hat Python 3.9 systemweit. HiMeS-Docker-Container
 
 **Alternativ**: Lokal `pyenv` mit 3.11 einrichten. Noch nicht gemacht, Priorität niedrig (Docker-Tests reichen).
 
+### Ad-hoc-Scripts dürfen nicht stdlib überschatten
+
+Rare Bug aus Phase 1.5.10: `/tmp/inspect.py` (ein Ad-hoc-Debug-Script) wurde bei `import inspect` anstelle der Python-stdlib geladen, weil `/tmp` im PYTHONPATH landete.
+
+**Regel**: Ad-hoc-Scripts im Container oder auf VPS dürfen NIEMALS Python-stdlib-Namen haben (`inspect`, `os`, `sys`, `json`, `time`, etc.).
+
+Prefix verwenden: `/tmp/debug_inspect.py`, `/tmp/himes_check.py`. Oder sofort nach Nutzung löschen.
+
+### Zombie-Prozesse bei Service-Migration
+
+Bei Phase 1.5.21 hat ein alter `mcp-caldav`-Prozess (vor systemd-Migration manuell gestartet) 2 Tage parallel zum neuen Service weitergelaufen trotz normaler `kill`-Signale. Port 8001 war belegt, neuer systemd-Service konnte nicht binden.
+
+**Lösung**: `pkill -9 -f <pattern>` zwingt den Prozess ab. Beispiel:
+```bash
+pkill -9 -f mcp-caldav
+# Danach systemd-Service starten, saubere Übernahme
+```
+
+**Prävention**: Bei Phase 1.5.22 (Deployment-Migration jarvis-caldav → Docker) vor dem ersten Container-Start:
+```bash
+ps aux | grep -E "mcp-caldav|jarvis-caldav" | grep -v grep
+# Wenn Prozesse da sind: pkill -9 vor docker-compose up
+```
+
+### SDK-Usage: ClaudeSDKClient bevorzugt über query()
+
+Aus Phase 1.5.10d-Debug: Die zwei SDK-Interfaces haben sehr unterschiedliches Verhalten.
+
+| Interface | Verhalten | Use-Case |
+|---|---|---|
+| `query()` | Neuer Subprocess pro Call, ~12s Overhead | Einmalige Tasks |
+| `ClaudeSDKClient` (async with) | Ein Subprocess, Session-Continuity | Dauer-Prozesse |
+
+**Regel**: Für Jarvis-artige Anwendungen (Multi-Turn-Conversation, persistente Session) IMMER `ClaudeSDKClient` im `async with`-Block. `query()` nur für One-Off-Tasks (z.B. isolierte Analyse-Jobs).
+
+Referenz: GitHub Issue #34 des claude-agent-sdk-Repos. Relevant für Phase 1.5.22 Backend-Protocol-Design (SDKBackend nutzt ClaudeSDKClient, APIBackend wird eigenes Pattern haben).
+
 ---
 
 ## 13. ADR (Architektur-Entscheidungen)
@@ -1238,6 +1275,7 @@ Aufwand: 15-30 Min.
 | 2026-04-16 | 22 | DB Nominatim-Geocoding: HAFAS löste Adressen falsch auf (Otto-Pankok-Schule→Schule Blücherstr., Am Rathaus→Rathausmarkt). Fix: Nominatim-Geocoding (wie CalDAV) in resolve_location() integriert. _looks_like_station() Heuristik: Station-Keywords→HAFAS, Adress-Keywords (Schule/Straße/Hospital/Klinik)→Nominatim, Ziffern→Nominatim. _geocode_nominatim() async via run_in_executor, Mülheim als Default-Stadt-Kontext, _location_cache. _set_location_params() mit from.address statt from.name, keine Fake-IDs an HAFAS. |
 | 2026-04-16 | 23.1 | Phase 1.5.20 Follow-up: 3 Edge-Cases gefixt nach Telegram-Test. DB-FIX-5a (Guard _is_near_negation erkennt Refusal-Kontext "kein Tool"/"empfehle App" → kein False-Positive-Disclaimer mehr), DB-FIX-5b (SYSTEM_PROMPT listet alle 9 DB-Tools mit vollem mcp__deutsche-bahn__-Präfix + Anweisung "nicht deferred, IMMER direkt aufrufen, kein ToolSearch" — Root Cause: Claude nutzte ToolSearch wenn MCP-Status "pending", fand nichts, halluzinierte "kein Tool"), DB-FIX-5c (_is_remark_relevant(final_destination=...) droppt "zwischen X und Y" wenn eine Station = final destination und andere off-route = downstream). +10 Tests. |
 | 2026-04-16 | 23.2 | DB-FIX-6 (Pending-MCP Race + Global Refusal Short-Circuit): DB-FIX-6a — Guard Tier-1 `_GLOBAL_REFUSAL_MARKERS` Short-Circuit (Text mit "nicht verfügbar"/"DB Navigator App"/"ohne live-verifikation" etc. → ganze Message = Refusal → skip alle Domain-Checks). Löst S3-Refusal mit 3× Mention wo letzte außerhalb ±150-Zeichen-Fenster war. DB-FIX-6b — `ClaudeResponse.pending_mcps` Feld in claude_subprocess.py, Orchestrator Auto-Retry wenn (pending_mcps + 0 tool_calls + refusal-text via `_TOOL_REFUSAL_MARKERS`) → 2s Pause + fresh Session. Transparente Lösung für MCP-Race-Condition bei erstem Call. +3 Tests (94/94 Docker). |
+| 2026-04-20 | 34 | OPS-NOTES aus Phase-1.5.10/1.5.21-Debrief ergänzt: (a) Ad-hoc-Scripts dürfen nicht stdlib überschatten (rare Bug). (b) Zombie-Prozesse bei systemd-Migration via `pkill -9` beenden (relevant für Phase 1.5.22 jarvis-caldav-Migration). (c) SDK-Usage ClaudeSDKClient vs query() dokumentiert (GitHub Issue #34). |
 | 2026-04-20 | 33 | Neue Phase 1.5.34 (Telegram Attribution in Replies) aus Phase-1.5.20-Debrief-Chat: UX-Verbesserung, Trigger-Quelle in Bestätigungen mitschicken. Motivation: Things-3-Crash-Incident, Majid wollte Autonomie-Level klarer sehen können. |
 | 2026-04-20 | 32 | OPS-NOTES ergänzt aus Phase 1.5.20 Debrief: (a) Tool-Error-Strukturierung als Halluzinations-Prävention (Lehre aus DB-FIX-1). (b) Python-Version-Mismatch 3.9/3.11 dokumentiert (mcp-SDK braucht 3.10+). Beide als OPS-Pattern für zukünftige MCP-Entwicklung. |
 | 2026-04-20 | 31 | **Parallel-Chat-Sync (HA-MCP + MCP-Recherche).** (a) Phase 1.5.33 Home Assistant MCP Integration neu angelegt (🔶 In Progress): ha-mcp Add-on auf HA Green installiert (86 Tools in 34 Modulen), Claude Desktop via mcp-proxy verbunden, VPS-Integration pending — wartet auf Cloudflare-Domain (himes-home.uk) + Tunnel. (b) Phase 1.5.9 umbenannt Brave Search → Tavily+Exa (Brave kein Free Tier mehr seit Feb 2026). (c) MCP-Katalog präzisiert: konkrete Package-Namen für Weather (`@dangahagan/weather-mcp`), Gmail (`ArtyMcLabin/Gmail-MCP-Server`, 🔶 pausiert wegen Security-Review), Google Maps (`modelcontextprotocol/server-google-maps` offiziell Anthropic, 🔶 pausiert wegen Billing-Account). (d) Neue Verworfen-Sektion: Apple Reminders (VPS-inkompatibel), Apple Maps (keine strukturierten Daten), Brave Search (kein Free Tier), Perplexity (Kostenmodell inkompatibel mit ADR-023). (e) Eigener DB-MCP auf transport.rest als Phase 2.17 angelegt (2-3 Wochen Aufwand, nach Phase 1.5-Abschluss). (f) ADR-032 (ha-mcp-Wahl) + ADR-033 (Tavily+Exa statt Brave). (g) OPS-NOTES: Home-Assistant-Remote-Zugriff-Strategie (Cloudflare Tunnel, Secret Path in .env nicht committed). |
