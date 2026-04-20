@@ -1,5 +1,5 @@
 # HiMeS — MASTER REFERENCE
-> **Version:** v25.10 · **Stand:** 2026-04-20 · **Pfad:** `docs/MASTER-REFERENCE.md`
+> **Version:** v25.11 · **Stand:** 2026-04-21 · **Pfad:** `docs/MASTER-REFERENCE.md`
 > **Nutzung:** `Lies docs/MASTER-REFERENCE.md und fahre fort mit Phase [X.Y]: [Task].`
 > **Nach Task:** Status in dieser Datei updaten + committen.
 
