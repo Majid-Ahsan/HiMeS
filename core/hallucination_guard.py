@@ -273,56 +273,11 @@ def build_default_guard() -> HallucinationGuard:
         disclaimer=db_disclaimer,
     )
 
-    # ── Weekday-Halluzinations-Schutz (Phase 1.5.25) ──────────────────────
-    # Der Bug: Claude behauptet einen Wochentag für ein bestimmtes Datum,
-    # ohne time-MCP gegenzuchecken. Beleg-Beispiel (2026-04-18):
-    #   "Musikschule-Termine sind nicht morgen, sondern nächsten Donnerstag
-    #    (24. April) ..." — 24.04.2026 ist aber ein Freitag.
-    #
-    # Pattern-Design: Wochentag-Name UND Datum müssen nah zusammen stehen
-    # (innerhalb ~40 Zeichen). Wochentag allein oder Datum allein triggert
-    # nicht — nur die Kombination ist riskant.
-    #
-    # Tool-Prefix-Design: NUR mcp__time__ zählt als "backed". Bewusst NICHT
-    # CalDAV — der Bug entstand GERADE weil Claude CalDAV-Daten falsch
-    # zusammenfasste (halluzinierter Wochentag). Details: siehe Logs
-    # (has_caldav-Feld) für spätere v2-Smart-Skip-Entscheidung.
-    _weekday = (
-        r'(?:Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag)'
-    )
-    _date_dmy = r'\d{1,2}\.\s?\d{1,2}\.(?:\s?\d{2,4})?'
-    _date_iso = r'\d{4}-\d{2}-\d{2}'
-    _date_mn = (
-        r'\d{1,2}\.\s+(?:Januar|Februar|M(?:ä|ae)rz|April|Mai|Juni|Juli|'
-        r'August|September|Oktober|November|Dezember)(?:\s+\d{2,4})?'
-    )
-    _date_any = f'(?:{_date_dmy}|{_date_iso}|{_date_mn})'
-
-    weekday_patterns = [
-        # Weekday then date within 40 chars (non-greedy)
-        rf'\b{_weekday}\b.{{0,40}}?{_date_any}',
-        # Date then weekday within 40 chars (non-greedy)
-        rf'{_date_any}.{{0,40}}?\b{_weekday}\b',
-    ]
-    weekday_disclaimer = (
-        "\n\n⚠️ _Wochentag nicht über time-MCP verifiziert. "
-        "Bitte im Kalender gegenprüfen._"
-    )
-    # Phase 1.5.30 — Datum-Tools in himes-tools zählen ebenfalls als backed.
-    # Claude soll diese statt time-MCP convert_time nutzen (die neueren Tools
-    # können Wochentage für beliebige Zukunfts-Daten ausrechnen).
-    weekday_tool_prefixes = [
-        "mcp__time__",
-        "mcp__himes-tools__get_weekday_for_date",
-        "mcp__himes-tools__add_days",
-        "mcp__himes-tools__days_between",
-        "mcp__himes-tools__next_weekday",
-    ]
-    guard.register_domain(
-        name="weekday",
-        patterns=weekday_patterns,
-        tool_prefixes=weekday_tool_prefixes,
-        disclaimer=weekday_disclaimer,
-    )
+    # NOTE: The "weekday" domain (Phase 1.5.25) was removed in Phase 1.5.32
+    # cleanup. The CalendarAssertion layer (core/calendar_assertion.py)
+    # replaces it with deterministic weekday-vs-date validation via
+    # datetime.date.weekday() — this works for any response, including
+    # follow-ups answered from session memory where the tool isn't called
+    # again, which produced false positives in the old tool-tracking guard.
 
     return guard

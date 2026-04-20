@@ -11,6 +11,7 @@ from fastapi import FastAPI
 
 from config.settings import settings
 from core.claude_subprocess import ClaudeSubprocess, ClaudeErrorType
+from core.calendar_assertion import CalendarAssertion
 from core.hallucination_guard import build_default_guard
 from core.sdk_client import SDKClient
 from input.telegram_adapter import TelegramAdapter
@@ -42,6 +43,7 @@ class Orchestrator:
         self._health_app = self._build_health_app()
         self._shutdown_event = asyncio.Event()
         self._guard = build_default_guard()
+        self._calendar_assertion = CalendarAssertion()
 
     def _build_health_app(self) -> FastAPI:
         app = FastAPI(docs_url=None, redoc_url=None)
@@ -301,6 +303,26 @@ class Orchestrator:
                 exc_info=True,
             )
             final_text = response.text
+
+        # Calendar assertion — deterministic weekday+date cross-check via
+        # datetime.date.weekday(). Runs after the hallucination guard so
+        # both disclaimers can stack. Like the guard: soft, never rewrites.
+        try:
+            is_mismatch, correction = self._calendar_assertion.check(final_text)
+            if is_mismatch:
+                final_text = final_text + correction
+                logger.warning(
+                    "orchestrator.calendar_assertion_triggered",
+                    user_id=user_id,
+                    text_len=len(final_text),
+                )
+        except Exception as assertion_err:
+            logger.error(
+                "orchestrator.calendar_assertion_crashed",
+                user_id=user_id,
+                error=str(assertion_err),
+                exc_info=True,
+            )
 
         logger.info(
             "orchestrator.response_sent",
