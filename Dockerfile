@@ -16,10 +16,10 @@ RUN npm install -g @anthropic-ai/claude-code
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY requirements.txt requirements.lock ./
 RUN pip install --upgrade pip setuptools
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install mcp-server-time --break-system-packages
+RUN pip install --no-cache-dir -r requirements.lock
+# mcp-server-time is pinned in requirements.lock
 
 COPY . .
 
