@@ -1,5 +1,5 @@
 # HiMeS — MASTER REFERENCE
-> **Version:** v25.4 · **Stand:** 2026-04-20 · **Pfad:** `docs/MASTER-REFERENCE.md`
+> **Version:** v25.6 · **Stand:** 2026-04-20 · **Pfad:** `docs/MASTER-REFERENCE.md`
 > **Nutzung:** `Lies docs/MASTER-REFERENCE.md und fahre fort mit Phase [X.Y]: [Task].`
 > **Nach Task:** Status in dieser Datei updaten + committen.
 
@@ -20,7 +20,7 @@
 | 1.5.6 | MEMORY.md Init | ⬜ | Auto-Erstellung bei Startup |
 | 1.5.7 | System Prompt extern | 🔶 | In prompts/system.md auslagern (Prompt selbst ✅, dynamisches Datum ✅) |
 | 1.5.8 | Health Monitoring | ⬜ | **Reihenfolge kritisch**: ZUERST /health-Endpoint in `core.orchestrator` implementieren (aiohttp, Port 8080), DANN healthcheck-Block in `docker-compose.yml` reaktivieren. Endpoint MUSS vor healthcheck existieren, sonst Container-Restart-Loop. Der Block wurde am 2026-04-17 entfernt weil curl auf Port 8080 fehlschlug (Bot hatte keinen HTTP-Server). Zusätzlich: Self-Check alle 5min + Telegram-Alert an TELEGRAM_ADMIN_CHAT_ID, Anti-Spam 1 Alert/Fehlertyp/Stunde. |
-| 1.5.9 | Brave Search MCP | ⬜ | mcp_config.json + BRAVE_API_KEY |
+| 1.5.9 | Search MCP (Tavily + Exa) | ⬜ | Brave Search verworfen (kein Free Tier mehr seit Feb 2026, siehe Verworfen-Sektion). Ersetzt durch Tavily + Exa (beide Free Tier ohne CC). API Keys noch nicht geholt. mcp_config.json + TAVILY_API_KEY + EXA_API_KEY. Redundanz durch zwei Provider reduziert Ausfall-Risiko. |
 | 1.5.10 | Latenz-Optimierung | ✅ KOMPLETT | 1.5.10 abgeschlossen. Pre-Classification, Typing-Indikator, SDK-Singleton, ToolSearch-Off (v2a Whitelist + v2b Env-Var, Commits 15da656 + 3c316b2). Gesamtergebnis: -20 bis -77% Latenz je nach Szenario. Tool-heavy limitiert durch externe APIs (iCloud/HAFAS). Phase 1.5.10f (Streaming) durch SDK-Limit nicht als Token-Stream machbar — umgedeutet zu Tool-Progress-Updates (siehe 1.5.10f). |
 | 1.5.10f | Tool-Progress-Updates | ⬜ Optional | Umdeutung von ursprünglich geplantem Token-Streaming (durch SDK-Limit nicht machbar, ADR-024). Neu: Bei ToolUseBlock-Events editierbare Status-Zeile in Telegram ("🔧 CalDAV wird abgefragt…"). Macht tool-heavy Anfragen (Wochenübersicht 40s) subjektiv erträglich. NACH 1.5.22 und 1.5.26. |
 | 1.5.12 | Rich Media Output | ✅ | Deployed+getestet: Notion-Fotos ✅, PDF/Audio/Location Parser bereit (Maps MCP fehlt noch) |
@@ -42,6 +42,7 @@
 | 1.5.29 | CalDAV Recurrence-Exception-Handling | ✅ | caldav-mcp Commits `eddfab6` (1.5.29a: `date_search` → `search(expand=True)` — iCloud expandiert Serien server-side) + `1870046` (1.5.29b: widen server window ±14 Tage, filter client-side nach DTSTART — weil iCloud Overrides nach RECURRENCE-ID matched, nicht neue DTSTART). Motivation: Musikschule-Bug 2026-04-19 (verschobene Fr-Instanz auf So unsichtbar). Technisch verifiziert gegen echten iCloud-Kalender. 10 neue Tests, 105/105 grün. |
 | 1.5.30 | Time-Arithmetic Tools + Strict Event-Bucketing | ✅ | HiMeS Commit `da69a25`. 4 neue Tools in `himes-tools` (`get_weekday_for_date`, `add_days`, `days_between`, `next_weekday`) ersetzen Claude's Mental-Math. System-Prompt erweitert (Wochentag-Regel zeigt explizit auf diese Tools) + strikte Event-zu-Tag-Bucketing-Regel für Wochenübersichten. HallucinationGuard weekday-Domain erweitert um himes-tools-Prefixes. 22 neue Tests. Verifiziert: "Nächste Musikschule = Fr 24.04", Wochentags-Labels korrekt. |
 | 1.5.32 | Calendar Assertion-Layer | ⬜ **PFLICHT** | Post-Deploy-Tests 2026-04-19 haben **zwei Drift-Muster reproduziert** die die Prompt-Regel in 1.5.30 nicht verlässlich fängt: (a) Event-zu-Tag-Drift (5 Mi-Events unter Di-Section trotz korrekter DTSTART), (b) Historische-Recap-Halluzinationen (Pilates: 5 Daten alle als Dienstag annotiert, alle sind Mittwoch — tool_calls=1, get_weekday_for_date wurde nicht aufgerufen trotz Pflicht-Regel). Soft-Guard prüft deterministisch: jedes Wochentag+Datum-Paar im Antworttext via `date.fromisoformat().weekday()` gegen angebliche Angabe, bei Mismatch **konkrete Korrektur im Disclaimer**. Jedes Event-Datum im Text muss zu DTSTART aus Tool-Output passen. Wie HallucinationGuard architektur-kompatibel (Warning-Log + Disclaimer, kein Rewrite). Reihenfolge: nächster Task nach dieser Session, vor weiteren Kalender-Features. |
+| 1.5.33 | Home Assistant MCP Integration | 🔶 In Progress | Parallele Integration in separatem Chat gestartet. Status 2026-04-20: (a) Entscheidung ha-mcp (homeassistant-ai/ha-mcp) nach Vergleich von 5 Alternativen (offizieller HA MCP, voska/hass-mcp, tevonsb/homeassistant-mcp, mtebusi/HA_MCP). (b) HA OS Add-on installiert auf HA Green (v7.1.0, 34 Module, 86 Tools). (c) LAN-Endpoint verifiziert: http://192.168.178.89:9583/private_<REDACTED>. (d) Claude Desktop via mcp-proxy verbunden (Running). OFFENE SCHRITTE: (1) Domain himes-home.uk bei Cloudflare registrieren (war temporär blockiert, Alternative .org), (2) Cloudflare Tunnel auf HA Green einrichten, (3) Claude Desktop Funktionstest ("Welche Geräte habe ich?"), (4) VPS-Integration: mcp_config.json + settings.py + Dockerfile + System-Prompt + .env (HA_MCP_URL), (5) Claude-Code-Prompt `himes-ha-mcp-integration-prompt.md` existiert, wartet auf finale HTTPS-URL. |
 
 **Empfohlene Reihenfolge:** ~~1.5.11~~ → ~~1.5.12~~ → ~~1.5.14~~ → ~~1.5.15~~ → ~~1.5.16~~ → ~~1.5.17~~ → ~~1.5.18~~ → ~~1.5.19~~ → ~~1.5.20~~ → ~~1.5.10~~ → ~~1.5.21~~ → ~~1.5.10e v2~~ → **1.5.22 (kritischer Pfad)** → **1.5.26 (Tool-Manifest)** → 1.5.4 (Session-Store) → 1.5.27 (Tool-Loop-Guard) → 1.5.2 (Message-Splitting) → 1.5.6 → 1.5.7 → 1.5.3 → 1.5.28 (things-mcp Härtung) → 1.5.8 → 1.5.5 → 1.5.9 → 1.5.10f (optional) → 1.5.23 → 1.5.24
 
@@ -662,7 +663,7 @@ himes/
 | Things 3 | SSE | create_task, list_today, complete_task | ✅ |
 | CalDAV | SSE | create_event, update_event, delete_event, get_events, search (+ Auto-Geocoding, ORGANIZER) | ✅ |
 | Time | stdio Python | current_time, convert_time (Europe/Berlin) | ✅ |
-| Weather | stdio TS | forecast, current_conditions, alerts | ✅ |
+| Weather (`@dangahagan/weather-mcp`) | stdio TS | forecast, current_conditions, alerts | ✅ |
 | Deutsche Bahn + VRR | stdio Python | db_search_connections (1+4 Verbindungen, alle Verkehrsmittel, Adressen+POIs), db_departures, db_arrivals, db_find_station, db_nearby_stations, db_trip_details, db_pendler_check, **db_train_live_status** (Live-Tracking: Verspätung, aktuelles Gleis, Gleiswechsel, nächster Halt), db_nrw_stoerungen (zuginfo.nrw) + 3 Timetable-API-Tools (optional). Strukturierte Error-Dicts + HallucinationGuard. | ✅ |
 
 ### Nächste (KRITISCH → HOCH)
@@ -670,19 +671,28 @@ himes/
 | Server | Prio | Transport | API-Key | Zweck |
 |---|---|---|---|---|
 | Filesystem | KRITISCH | stdio TS | Nein | Skills/Logs/Configs lesen+schreiben |
-| Brave Search | KRITISCH | stdio TS | Ja (2000/Mo free) | Web-Suche, Faktencheck |
+| Tavily + Exa (Search) | KRITISCH | stdio TS | Ja (Free Tier ohne CC) | Web-Suche, Faktencheck. Ersetzt Brave Search (Free Tier Feb 2026 eingestellt, siehe Verworfen). Zwei-Provider-Redundanz. Siehe Phase 1.5.9 + ADR-033. |
 | Telegram MCP | HOCH | stdio Python | Ja | Voller MTProto-Zugriff |
-| Gmail | HOCH | SSE/HTTP TS | Ja (OAuth) | Inbox, Drafts, senden |
+| Gmail (`ArtyMcLabin/Gmail-MCP-Server`) | HOCH 🔶 pausiert | SSE/HTTP TS | Ja (OAuth) | Inbox, Drafts, senden. Security-Pause: 100 Sterne, Code-Review pending bevor Deploy. Alternative zu prüfen: `google_workspace_mcp`. |
 | Reminder | HOCH | stdio/HTTP TS | Ja | Erinnerungen planen |
-| Google Maps | HOCH | stdio TS | Ja | Routen, Places, Entfernungen |
+| Google Maps (`modelcontextprotocol/server-google-maps`, offiziell Anthropic) | HOCH 🔶 | stdio TS | Ja | Routen, Places, Entfernungen. API-Key-Setup angefangen, pausiert wegen Billing-Account (wartet auf Unterstützung von Majids Vater). |
 | ~~Deutsche Bahn~~ | ~~HOCH~~ | ~~stdio/SSE~~ | ~~Ja~~ | ✅ Implementiert (himes_db) |
-| Home Assistant | HOCH | SSE/HTTP Python | Ja (Token) | Smart Home steuern |
+| Home Assistant (`homeassistant-ai/ha-mcp`) | HOCH 🔶 | SSE/HTTP via mcp-proxy | Ja (Token) | Smart Home steuern. 2026-04-20: `ha-mcp` Add-on auf HA Green installiert (86 Tools in 34 Modulen), Claude Desktop verbunden. VPS-Integration pending — wartet auf Cloudflare Tunnel + Domain. Siehe Phase 1.5.33 + ADR-032. |
 | CardDAV (dav-mcp) | HOCH | stdio TS | Nein (iCloud Auth) | Kontakte lesen/erstellen/suchen via iCloud CardDAV. Für: Visitenkarten, Kontaktkarten, "Wie ist Nedas Nummer?" |
 | Google Drive | HOCH | SSE/HTTP TS | Ja (OAuth) | Dateien suchen/hochladen/organisieren. Für: Dokument-Ablage, Personal Vault, "Schick mir mein Dokument X" |
 
 ### Später (MITTEL → OPTIONAL)
 
-WhatsApp (Twilio) · Exa Search · Firecrawl · Spotify · Currency (Frankfurter) · GitHub · SQLite (→Phase 2.2) · iMessage · Slack · Azure Translator · Whisper (→Phase 2.4) · TTS ElevenLabs · Apify
+WhatsApp (Twilio) · Firecrawl · Spotify · Currency (Frankfurter) · GitHub · SQLite (→Phase 2.2) · iMessage · Slack · Azure Translator · Whisper (→Phase 2.4) · TTS ElevenLabs · Apify
+
+### Verworfen
+
+| Server | Grund | Entschieden |
+|---|---|---|
+| Apple Reminders MCP | Läuft nicht auf VPS (nur lokal Mac/iPhone, kein Server-Deployment möglich) | 2026-04-14 |
+| Apple Maps MCP | Keine strukturierten Daten im Response (rein visuelle Integration, für LLM nicht verwertbar) | 2026-04-14 |
+| Brave Search | Free Tier im Februar 2026 eingestellt. Ersatz durch Tavily + Exa (siehe Phase 1.5.9 + ADR-033) | 2026-04-14 |
+| Perplexity MCP | Kostenmodell nicht kompatibel mit Abo-basierter Kostenstrategie (siehe ADR-023) | 2026-04-14 |
 
 **Regeln:** stdio = im Docker-Container · SSE = separat/extern · API-Keys in `.env` · Neue Server in `mcp_config.json`
 
@@ -766,6 +776,7 @@ Neda 7. Juli · Hossein 17. Juli · Majid 23. Juli · Taha 21. Oktober
 | 2.14 | Personal Vault | — | Google Drive | iCloud↔Google Drive Sync + Google Drive MCP = universeller Dateizugriff. "Schick mir meinen Personalausweis" → sucht in Drive → sendet per Telegram |
 | 2.15 | MCP Welle 2: Kernfunktionen | ⬜ Geplant | 1.5.23 | Maps, DB, Wetter, Search, Reminder, Notion, Gmail, HA |
 | 2.16 | MCP Welle 3: Erweiterungen | ⬜ Geplant | 2.15 | Telegram, Spotify, Twilio, Currency, Exa, Firecrawl, GitHub |
+| 2.17 | Eigener DB-MCP (transport.rest) | 1.5.19 | — | Erweiterung des aktuellen self-hosted `db-rest` (PaulvonBerg). Eigener MCP auf `transport.rest`-API für erweitertes A→B-Routing mit Geo-Awareness, Multi-Modal-Alternativen und Deutschland-weiter Verkehrsintegration. NACH Phase 1.5-Abschluss. Aufwand geschätzt 2-3 Wochen. |
 
 Parallel: HOCH-MCPs einrichten (Gmail, Google Drive, CardDAV, Maps, HA)
 
@@ -827,6 +838,17 @@ Für regelmäßige Restarts (Code-Deploys) bleibt `docker compose up -d --build 
 
 Mehrere Phasen haben historisch Code direkt auf der VPS eingecheckt (nicht via git) und erst später auf Local/GitHub nachgezogen. Das ist dokumentiert in Phase 1.5.21 und hier bewusst akzeptiert — VPS ist Working-Copy, Local ist Canonical Repository, GitHub ist Remote of Record. Bei jedem größeren Update-Zyklus: VPS → Local → GitHub sync.
 
+### Home Assistant Remote-Zugriff (Phase 1.5.33, pending)
+
+Strategie: Cloudflare Tunnel statt DuckDNS/Nabu Casa.
+- Domain: himes-home.uk ($5.30/Jahr bei Cloudflare, Registrierung pending)
+- Alternative: himes-home.org falls .uk blockiert bleibt
+- Tunnel-Route: himes-home.uk → HA Green :9583 (ha-mcp Add-on)
+- Authentifizierung: Secret Path (/private_<REDACTED>)
+- VPS-Zugriff: mcp-proxy wandelt HTTP-MCP in stdio für Claude SDK/CLI
+
+**.env-Variable (Phase 1.5.33)**: `HA_MCP_URL` — URL des ha-mcp-Endpoints via Cloudflare Tunnel. Format: `https://himes-home.uk/private_<REDACTED>` (pending bis Domain + Tunnel aktiv).
+
 ---
 
 ## 13. ADR (Architektur-Entscheidungen)
@@ -864,6 +886,8 @@ Mehrere Phasen haben historisch Code direkt auf der VPS eingecheckt (nicht via g
 | 029 | Wochentag-Halluzinations-Schutz (Phase 1.5.25 + 1.5.30): Zwei-Schicht. System-Prompt-Regel domain-übergreifend pflicht auf time-MCP bzw. himes-tools Datum-Tools (`get_weekday_for_date`/`add_days`/`days_between`/`next_weekday`). HallucinationGuard `weekday`-Domain als Safety-Net: Wochentag+Datum-Paar im Text ohne passenden Tool-Call → Soft-Disclaimer. Tools überdecken die Lücke von `mcp_server_time.convert_time` (nur Zeitzonen-Konvertierung, kein Future-Date-Weekday). | Aktiv |
 | 030 | CalDAV Recurrence-Handling (Phase 1.5.29): `calendar.search(expand=True)` server-side + widen ±14 Tage + client-side DTSTART-Filter. Nötig weil iCloud Overrides per RECURRENCE-ID (Original-Slot) match, nicht neuer DTSTART. Unterstützt moved/shifted Instanzen für Narrow-Range-Queries (z.B. get_today_events an verschobenem Tag). Kosten: ~28× mehr Daten bei Tages-Query — iCloud-Latenz dominiert, Payload-Overhead vernachlässigbar. | Aktiv |
 | 031 | Calendar Assertion-Layer (Phase 1.5.32, geplant): Validator prüft Kalender-Antworten gegen Tool-Output. Jede genannte Wochentag+Datum-Nennung muss durch Tool-Call in diesem Turn belegt sein. Jedes genannte Event muss im Tool-Result vorkommen (verhindert LLM-Drift bei langen Wochenübersichten — Beleg: 2026-04-19 Event-zu-Tag-Mismatch). Soft-Guard wie HallucinationGuard, niemals Rewrite. | Geplant |
+| 032 | ha-mcp (homeassistant-ai) als Home Assistant MCP-Server statt offizieller HA MCP-Integration. Entscheidung basiert auf: (a) HA OS Add-on verfügbar (simple Installation), (b) 86 Tools über 34 Module (umfassend), (c) aktive Entwicklung, (d) HTTP-Transport kompatibel mit mcp-proxy für Remote-Zugriff. Alternativen geprüft: voska/hass-mcp (weniger Tools), tevonsb/homeassistant-mcp (abandoned), mtebusi/HA_MCP (kleiner Scope). Phase 1.5.33. | Aktiv |
+| 033 | Search MCP: Tavily + Exa statt Brave Search. Brave Search hat Free Tier im Februar 2026 eingestellt. Tavily und Exa bieten beide kostenlose Tiers ohne Credit-Card-Requirement. Redundanz durch zwei Provider reduziert Ausfall-Risiko, erhöht Query-Qualität bei schwierigen Suchen. Aktivierung: Phase 1.5.9. | Geplant |
 
 ---
 
@@ -1182,6 +1206,7 @@ Aufwand: 15-30 Min.
 | 2026-04-16 | 22 | DB Nominatim-Geocoding: HAFAS löste Adressen falsch auf (Otto-Pankok-Schule→Schule Blücherstr., Am Rathaus→Rathausmarkt). Fix: Nominatim-Geocoding (wie CalDAV) in resolve_location() integriert. _looks_like_station() Heuristik: Station-Keywords→HAFAS, Adress-Keywords (Schule/Straße/Hospital/Klinik)→Nominatim, Ziffern→Nominatim. _geocode_nominatim() async via run_in_executor, Mülheim als Default-Stadt-Kontext, _location_cache. _set_location_params() mit from.address statt from.name, keine Fake-IDs an HAFAS. |
 | 2026-04-16 | 23.1 | Phase 1.5.20 Follow-up: 3 Edge-Cases gefixt nach Telegram-Test. DB-FIX-5a (Guard _is_near_negation erkennt Refusal-Kontext "kein Tool"/"empfehle App" → kein False-Positive-Disclaimer mehr), DB-FIX-5b (SYSTEM_PROMPT listet alle 9 DB-Tools mit vollem mcp__deutsche-bahn__-Präfix + Anweisung "nicht deferred, IMMER direkt aufrufen, kein ToolSearch" — Root Cause: Claude nutzte ToolSearch wenn MCP-Status "pending", fand nichts, halluzinierte "kein Tool"), DB-FIX-5c (_is_remark_relevant(final_destination=...) droppt "zwischen X und Y" wenn eine Station = final destination und andere off-route = downstream). +10 Tests. |
 | 2026-04-16 | 23.2 | DB-FIX-6 (Pending-MCP Race + Global Refusal Short-Circuit): DB-FIX-6a — Guard Tier-1 `_GLOBAL_REFUSAL_MARKERS` Short-Circuit (Text mit "nicht verfügbar"/"DB Navigator App"/"ohne live-verifikation" etc. → ganze Message = Refusal → skip alle Domain-Checks). Löst S3-Refusal mit 3× Mention wo letzte außerhalb ±150-Zeichen-Fenster war. DB-FIX-6b — `ClaudeResponse.pending_mcps` Feld in claude_subprocess.py, Orchestrator Auto-Retry wenn (pending_mcps + 0 tool_calls + refusal-text via `_TOOL_REFUSAL_MARKERS`) → 2s Pause + fresh Session. Transparente Lösung für MCP-Race-Condition bei erstem Call. +3 Tests (94/94 Docker). |
+| 2026-04-20 | 31 | **Parallel-Chat-Sync (HA-MCP + MCP-Recherche).** (a) Phase 1.5.33 Home Assistant MCP Integration neu angelegt (🔶 In Progress): ha-mcp Add-on auf HA Green installiert (86 Tools in 34 Modulen), Claude Desktop via mcp-proxy verbunden, VPS-Integration pending — wartet auf Cloudflare-Domain (himes-home.uk) + Tunnel. (b) Phase 1.5.9 umbenannt Brave Search → Tavily+Exa (Brave kein Free Tier mehr seit Feb 2026). (c) MCP-Katalog präzisiert: konkrete Package-Namen für Weather (`@dangahagan/weather-mcp`), Gmail (`ArtyMcLabin/Gmail-MCP-Server`, 🔶 pausiert wegen Security-Review), Google Maps (`modelcontextprotocol/server-google-maps` offiziell Anthropic, 🔶 pausiert wegen Billing-Account). (d) Neue Verworfen-Sektion: Apple Reminders (VPS-inkompatibel), Apple Maps (keine strukturierten Daten), Brave Search (kein Free Tier), Perplexity (Kostenmodell inkompatibel mit ADR-023). (e) Eigener DB-MCP auf transport.rest als Phase 2.17 angelegt (2-3 Wochen Aufwand, nach Phase 1.5-Abschluss). (f) ADR-032 (ha-mcp-Wahl) + ADR-033 (Tavily+Exa statt Brave). (g) OPS-NOTES: Home-Assistant-Remote-Zugriff-Strategie (Cloudflare Tunnel, Secret Path in .env nicht committed). |
 | 2026-04-20 | 30 | Phase 1.5.28 Schicht 1: things-mcp reaktiviert nach Cultured Code Cloud-Cleanup (Ticket vom 2026-04-17 beantwortet, vergiftete History-Indices bereinigt; initial sync nach Reaktivierung: 2 changes). `docker start things-mcp` + `restart=unless-stopped`. HiMeS-Bot restart. 4 manuelle Test-Szenarien erfolgreich (2 reads: `things_list_today/inbox/anytime/upcoming/completed`; 2 writes: "einkaufen" als ASCII + "neda anrufen morgen" mit Datum-Tool-Berechnung via `time__get_current_time`+`himes-tools__add_days`). things-mcp-Log zeigt beide Writes als saubere `action=0` (neue Tasks, Indices 7402+7403), keine Rapid-Fire-Schleife wie am 17.04 (damals 7× `action=1` auf selbe UUID in 2s). Tasks in Things3-App auf Mac+iPhone sichtbar, keine Crashes. Schicht 2 (Härtung: Input-Sanitization, Unicode-Filter, Dry-Run-Mode) weiterhin offen, Priorität niedrig solange keine neuen Incidents. |
 | 2026-04-20 | 29.3 | Post-Deploy User-Testing der 2026-04-19-Kalender-Session dokumentiert in Sektion 1e. Core-Bugs bestätigt weg (verschobene Musikschule sichtbar, "nächste Musikschule Fr 24.04", Wochentags-Labels Mo-So konsistent). Zwei Drift-Muster bestätigt die 1.5.32 erzwingen: Event-zu-Tag-Drift (5 Mi-Events unter Di gelandet) + Historische-Recap-Halluzination (Pilates: alle 5 Daten als Dienstag annotiert, alle sind Mittwoch; tool_calls=1, `get_weekday_for_date` nicht aufgerufen trotz Pflicht-Regel). Guard-Disclaimer fiel korrekt in beiden Fällen. 1.5.32 Status-Zeile auf **PFLICHT** präzisiert mit konkreter Scope-Definition aus Test-Befunden. Kein Code-Change. |
 | 2026-04-19 | 29.2 | Kalender-Komplett-Fix-Session nach Musikschule-Bug-Incident. Vier Commits über zwei Repos: (a) caldav-mcp `eddfab6` — date_search→search(expand=True), löst Multi-VEVENT-Blob-Parse-Fehler; (b) caldav-mcp `1870046` — widen ±14 Tage + client-side DTSTART-Filter, löst iCloud-RECURRENCE-ID-Matching-Quirk der moved Instanzen für Narrow-Range-Queries unsichtbar machte; (c) HiMeS `068837f` — Phase 1.5.25 Wochentag-Halluzinations-Schutz (Prompt-Regel + HallucinationGuard weekday-Domain); (d) HiMeS `da69a25` — Phase 1.5.30 Time-Arithmetic Tools in himes-tools (`get_weekday_for_date`/`add_days`/`days_between`/`next_weekday`) + strikte Event-zu-Tag-Bucketing-Regel. Reale Bugs verifiziert: Musikschule am Sonntag 19.04 erscheint jetzt korrekt, "nächster Freitag" korrekt 24.04 statt 25.04, Wochentags-Labels Mo 20–So 26 konsistent. Restproblem: Event-zu-Tag-Drift bei langen Wochenübersichten (5 Mi-Events unter Di gelandet) nur teilweise durch Prompt reduziert, Phase 1.5.32 Calendar Assertion-Layer als offenes Folge-Ticket dokumentiert. Neue Sektion 1e mit vollem Session-Protokoll, neue Zeilen für Phase 1.5.29/1.5.30/1.5.32 in Status-Tabelle, ADRs 029/030/031. Tests: caldav-mcp 105/105 grün, HiMeS 73/73 grün. |
