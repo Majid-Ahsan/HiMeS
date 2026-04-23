@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     environment:
       - USER_AGENT=HiMeS/1.0
+      - TZ=Europe/Berlin
     ports:
       - "127.0.0.1:3000:3000"    # nur lokal erreichbar
     healthcheck:
@@ -36,6 +37,7 @@ services:
       - ./config:/app/config      # MCP config
     environment:
       - PYTHONUNBUFFERED=1
+      - TZ=Europe/Berlin
     ports:
       - "${HEALTH_PORT:-8080}:8080"
     logging:
