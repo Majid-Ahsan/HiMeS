@@ -371,15 +371,105 @@ Plus: tags (automatisch extrahiert, wie bei Daily-Log)
 
 ### Beziehungs-Vokabular für rel_to_anchor
 
-Standard-Werte (vollständige Liste folgt in späterer Session):
-- Direkte Familie: mother, father, spouse, son, daughter, sibling
-- Erweiterte Familie: uncle, aunt, cousin, nephew, niece, 
-  grandparent, grandchild, in-law
-- Nicht-familiär: friend, colleague, patient, neighbor, contact
+Vollständige Liste der erlaubten Werte für rel_to_anchor, organisiert in 9 semantische Gruppen.
 
-Multi-User-Kontext: Bei Queries von anderen Usern (Taha, Hossein) 
-wechselt der Query-Anchor temporär. Die rel_to_anchor-Werte in den 
-Dateien bleiben aber immer relativ zum Default-Anchor (Majid).
+#### Gruppe 1 — Direkte Kernfamilie
+
+- mother — Mutter
+- father — Vater
+- son — Sohn
+- daughter — Tochter
+- brother — Bruder
+- sister — Schwester
+
+#### Gruppe 2 — Ehe und Partnerschaft
+
+- husband — Ehemann
+- wife — Ehefrau
+- ex_husband — geschiedener Ehemann
+- ex_wife — geschiedene Ehefrau
+- partner — nicht-verheirateter Lebenspartner
+
+#### Gruppe 3 — Großeltern und Enkel
+
+- grandfather — Großvater
+- grandmother — Großmutter
+- grandson — Enkel
+- granddaughter — Enkelin
+
+Unterscheidung mütterlich/väterlich: über rel_via (siehe unten).
+
+#### Gruppe 4 — Onkel, Tante, Cousins
+
+- uncle — Onkel
+- aunt — Tante
+- cousin_male — männlicher Cousin
+- cousin_female — weibliche Cousine
+
+Weitere Details zur Herkunft (mütterlich/väterlich) über rel_via und gender-Feld.
+
+#### Gruppe 5 — Nichte und Neffe
+
+- nephew — Neffe
+- niece — Nichte
+
+#### Gruppe 6 — Schwiegerverwandte
+
+- father_in_law — Schwiegervater
+- mother_in_law — Schwiegermutter
+- brother_in_law — Schwager
+- sister_in_law — Schwägerin
+- son_in_law — Schwiegersohn
+- daughter_in_law — Schwiegertochter
+
+#### Gruppe 7 — Stiefverwandte
+
+- stepfather — Stiefvater
+- stepmother — Stiefmutter
+- stepson — Stiefsohn
+- stepdaughter — Stieftochter
+- stepbrother — Stiefbruder
+- stepsister — Stiefschwester
+
+#### Gruppe 8 — Nicht-familiär
+
+- friend — Freund/Freundin
+- close_friend — enger Freund/beste Freundin
+- colleague — Kollege/Kollegin
+- boss — Vorgesetzter
+- employee — Mitarbeiter
+- patient — Patient (medizinischer Kontext)
+- neighbor — Nachbar
+- acquaintance — Bekannter, loser Kontakt
+
+#### Gruppe 9 — Sonderfälle
+
+- adopted_son — Adoptivsohn
+- adopted_daughter — Adoptivtochter
+- godparent — Patenelternteil
+- godchild — Patenkind
+- unknown — Beziehung nicht klar
+
+
+### Vokabular für rel_via
+
+rel_via gibt den Vermittler-Weg bei indirekten Beziehungen an. Erlaubte Werte:
+
+- mother — über die Mutter (mütterlicherseits)
+- father — über den Vater (väterlicherseits)
+- spouse — über den Ehepartner
+- null — nicht anwendbar (bei direkten Beziehungen wie mother, son, wife)
+
+Beispiele:
+- uncle mit rel_via: mother = Onkel mütterlicherseits (Bruder der Mutter)
+- grandfather mit rel_via: father = Großvater väterlicherseits
+- sister_in_law mit rel_via: spouse = Schwester des Ehepartners
+- mother mit rel_via: null = eigene Mutter (direkte Beziehung)
+
+
+### Multi-User-Kontext
+
+Bei Queries von anderen Usern (Taha, Hossein) wechselt der Query-Anchor temporär. Die rel_to_anchor-Werte in den Dateien bleiben aber immer relativ zum Default-Anchor (Majid).
 
 
 ### Text-Body-Struktur (6 feste Sektionen)
@@ -612,7 +702,7 @@ in Gesprächen äußert.
 
 ## Offene Punkte für nächste Sessions
 
-- [ ] Beziehungs-Vokabular: Vollständige Liste festlegen (Standard-Werte sind bereits in Memory-Typ 2 dokumentiert, vollständige Enum-Liste folgt)
+- [x] Beziehungs-Vokabular: Vollständige Liste definiert (9 Gruppen, 44 Werte, siehe Memory-Typ 2)
 - [ ] Ableitungs-Regeln: Welche automatischen Schlüsse sind valide?
 - [ ] Initial-Daten-Strategie: Setup-Skript vs passives Lernen
 - [ ] Konkrete Templates pro Memory-Typ (Daily-Log ✓, Person ✓, Ort ⬜, Medikament ⬜, Konzept ⬜, Meeting ⬜, Research ⬜, Conversation ⬜)
@@ -626,3 +716,4 @@ in Gesprächen äußert.
 - 2026-04-23: Cleanup. Regel 10 Überschrift korrigiert (7 Typen → mehrere Typen). Event-Type-Werte strikt englisch (sozialer_kontakt → social_contact). Regel 5 um Enum-Klarstellung erweitert.
 - 2026-04-23: Entity-Person-Schema definiert. Dateinamen-Konvention (vorname-nachname.md), 12 Frontmatter-Felder in 5 Gruppen, 6-Sektionen-Text-Body. Insights-Datei-Schema als paralleler Memory-Typ 2a eingeführt. Dual-Datei-Prinzip (Entity für Fakten, Insights für Charakter-Muster) etabliert.
 - 2026-04-23: Cleanup. Regel 3 auf neue Dateinamen-Konvention (vorname-nachname.md) aktualisiert. Platzhalter `<n>` zu `<name>` an drei Stellen korrigiert. Header-Status auf Phase 2.1 aktualisiert. Offene-Punkte-Eintrag für Beziehungs-Vokabular präzisiert.
+- 2026-04-23: Beziehungs-Vokabular für rel_to_anchor vollständig definiert (9 semantische Gruppen, 44 Werte). Vokabular für rel_via formalisiert (4 Werte). Unterscheidung mütterlich/väterlich konsequent über rel_via gelöst.
