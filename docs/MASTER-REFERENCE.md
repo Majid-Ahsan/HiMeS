@@ -816,6 +816,10 @@ Noch offen für folgende Sessions bevor Cognee installiert wird:
 - Erste Beispiel-Dateien mit echten Daten
 - Prompt-Regeln in prompts/rules.md die Regel 9 umsetzen
 
+Update 2026-04-23: Daily-Log-Schema als erster konkreter Memory-Typ 
+definiert (siehe docs/memory-schema.md, Abschnitt "Memory-Typ 1: 
+Daily-Log").
+
 ### Phase 2.13 — Use-Case: WebUntis-Integration (Tahas Stundenplan)
 
 Kein fertiger MCP verfügbar (Stand 2026-04-16). Drei Optionen für zukünftige Implementierung:
