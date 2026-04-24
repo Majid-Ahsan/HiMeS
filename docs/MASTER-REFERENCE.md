@@ -796,6 +796,26 @@ Cognee läuft auf VPS als Docker Container:
 
 Integration-Abhängigkeitskette: Phase 1.5.6 (MEMORY.md) → 1.5.4 (Session-Cleanup) → 2.1 (Cognee) → 2.5 (Dream Phase). Nicht vor Phase 2.1 aktivieren — Cognee braucht Session-State als Input.
 
+#### Phase 2.1 Vorarbeit — Memory-Schema ✓ (2026-04-23)
+
+Konzeptionelle Design-Arbeit für das Memory-Schema abgeschlossen. 
+10 Grundregeln festgelegt, Anchor-basiertes Beziehungs-System 
+definiert, Multi-User-Vorbereitung über Anchor-Wechsel zur Query-Zeit.
+
+Volle Spezifikation: docs/memory-schema.md
+
+Dies ist die Grundlage für die eigentliche Cognee-Implementation 
+in Phase 2.1. Die Memory-Markdown-Dateien die später von Cognee 
+indexiert werden, folgen dem in memory-schema.md definierten Format.
+
+Noch offen für folgende Sessions bevor Cognee installiert wird:
+- Beziehungs-Vokabular (welche Werte für rel_to_anchor erlaubt sind)
+- Ableitungs-Regeln (was Jarvis automatisch schließen darf)
+- Initial-Daten-Strategie (Setup-Skript vs passives Lernen)
+- Konkrete Templates pro Memory-Typ (7 Typen identifiziert)
+- Erste Beispiel-Dateien mit echten Daten
+- Prompt-Regeln in prompts/rules.md die Regel 9 umsetzen
+
 ### Phase 2.13 — Use-Case: WebUntis-Integration (Tahas Stundenplan)
 
 Kein fertiger MCP verfügbar (Stand 2026-04-16). Drei Optionen für zukünftige Implementierung:
@@ -997,6 +1017,7 @@ Referenz: GitHub Issue #34 des claude-agent-sdk-Repos. Relevant für Phase 1.5.2
 | 031 | Calendar Assertion-Layer (Phase 1.5.32) — Check A live seit 2026-04-20: deterministische Wochentag-Validierung via `datetime.date.weekday()` statt Tool-Call-Tracking. Disclaimer enthält konkrete Korrektur statt nur "nicht verifiziert". Ersetzt ADR-029 weekday-Tracking-Domain. Vorteil: funktioniert auch bei Session-Memory-Antworten (kein Tool-Call im Turn nötig). Begleit-Maßnahme: `requirements.lock` für reproduzierbare Builds (Deploy-V1 hatte CalDAV-Regression durch Pip-Versions-Drift, V2 mit Lock erfolgreich). Check B (DTSTART-Bucketing-Validierung) bleibt offen. | Aktiv |
 | 032 | ha-mcp (homeassistant-ai) als Home Assistant MCP-Server statt offizieller HA MCP-Integration. Entscheidung basiert auf: (a) HA OS Add-on verfügbar (simple Installation), (b) 86 Tools über 34 Module (umfassend), (c) aktive Entwicklung, (d) HTTP-Transport kompatibel mit mcp-proxy für Remote-Zugriff. Alternativen geprüft: voska/hass-mcp (weniger Tools), tevonsb/homeassistant-mcp (abandoned), mtebusi/HA_MCP (kleiner Scope). Phase 1.5.33. | Aktiv |
 | 033 | Search MCP: Tavily + Exa statt Brave Search. Brave Search hat Free Tier im Februar 2026 eingestellt. Tavily und Exa bieten beide kostenlose Tiers ohne Credit-Card-Requirement. Redundanz durch zwei Provider reduziert Ausfall-Risiko, erhöht Query-Qualität bei schwierigen Suchen. Aktivierung: Phase 1.5.9. | Geplant |
+| 034 | Anchor-basiertes Memory-Schema (Phase 2.1 Vorarbeit, 2026-04-23): Personen-Beziehungen werden relativ zum Primary User (Majid) im Frontmatter-Feld `rel_to_anchor` definiert statt redundant in jeder Entity-Datei. Multi-User über temporären Anchor-Wechsel zur Query-Zeit. Abgeleitete Beziehungen via Graph-Traversal (`anchor.son.mother`, `anchor.spouse.mother`). Skalierbar für große Familien, Multi-User-ready ohne späteres Refactoring. Volle Spezifikation + 10 Grundregeln in docs/memory-schema.md. | Akzeptiert |
 
 ---
 
