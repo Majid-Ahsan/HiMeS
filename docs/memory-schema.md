@@ -62,6 +62,12 @@ Frontmatter-Keys bleiben englisch: `date`, `type`, `name`, `tags`,
 Werte und Text-Body: komplett frei — deutsch, persisch, gemischt. 
 Jarvis versteht alles.
 
+**Ausnahme:** Enumeration-Werte für type-Felder (zum Beispiel 
+calendar_event, social_contact, health_observation) bleiben strikt 
+englisch. Diese Werte werden von Code als Enum verwendet, daher 
+ist Konsistenz kritisch. Freie Beschreibungs-Werte (zum Beispiel 
+observation: fieber) dürfen weiter in jeder Sprache sein.
+
 ### Regel 6 — Anchor-basiertes Beziehungs-System
 
 Der Anchor ist der primäre Nutzer (Majid). Alle Personen-Beziehungen 
@@ -110,7 +116,7 @@ Jarvis antwortet aber nur auf die konkrete Frage.
 
 Keine proaktiven Lebensläufe. Kein unangefragtes Erzählen.
 
-### Regel 10 — Memory hat 7 Typen, nicht nur Personen
+### Regel 10 — Memory hat mehrere Typen, nicht nur Personen
 
 Das Memory-System speichert verschiedene Kategorien:
 
@@ -195,7 +201,7 @@ detected_events:
     person: klaus
     action: telefoniert
   
-  - type: sozialer_kontakt
+  - type: social_contact
     person: klaus
     proposed_date: 2026-04-24
 ```
@@ -291,7 +297,7 @@ detected_events:
     category: schule
   - type: shopping_need
     item: hefte
-  - type: sozialer_kontakt
+  - type: social_contact
     person: klaus
     proposed_date: 2026-04-24
 actions_created:
@@ -317,3 +323,4 @@ mir was machen.
 
 - 2026-04-23: Initial. Die 10 Regeln festgelegt in Session mit Claude.
 - 2026-04-23: Daily-Log-Schema als erster konkreter Memory-Typ definiert. Dual-Layer-Prinzip (Memory-Frontmatter + Action-Tickets) etabliert.
+- 2026-04-23: Cleanup. Regel 10 Überschrift korrigiert (7 Typen → mehrere Typen). Event-Type-Werte strikt englisch (sozialer_kontakt → social_contact). Regel 5 um Enum-Klarstellung erweitert.
