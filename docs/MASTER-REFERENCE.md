@@ -820,6 +820,11 @@ Update 2026-04-23: Daily-Log-Schema als erster konkreter Memory-Typ
 definiert (siehe docs/memory-schema.md, Abschnitt "Memory-Typ 1: 
 Daily-Log").
 
+Update 2026-04-23: Entity-Person-Schema (Memory-Typ 2) und 
+Insights-Datei-Schema (Memory-Typ 2a) definiert. Anchor-System 
+mit Default/Query-Anchor-Unterscheidung. Dual-Datei-Prinzip 
+(entities/ + insights/) für Fakten vs Charakter-Muster.
+
 ### Phase 2.13 — Use-Case: WebUntis-Integration (Tahas Stundenplan)
 
 Kein fertiger MCP verfügbar (Stand 2026-04-16). Drei Optionen für zukünftige Implementierung:
