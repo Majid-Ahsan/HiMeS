@@ -310,12 +310,311 @@ Muss noch Hefte kaufen. Klaus hat angerufen, will morgen mit
 mir was machen.
 ```
 
+## Memory-Typ 2: Entity — Person
+
+**Definition:** Eine Person-Entity ist eine Datei über einen Menschen 
+im Leben des Users: Familie, Freunde, Kollegen, Patienten, lose 
+Kontakte. Jarvis erstellt und pflegt diese Dateien automatisch 
+basierend auf Daily-Log-Erwähnungen.
+
+
+### Dateipfad und Benennung
+
+Pfad: /var/himes-data/memory/entities/<vorname-nachname>.md
+
+Format: Kleinbuchstaben, Umlaute erhalten, Vorname und Nachname 
+durch Bindestrich getrennt.
+
+Beispiele:
+- majid-ahsan.md (Anchor)
+- taha-ahsan.md
+- reza-ahmadi.md
+- fatima-ahmadi.md
+- klaus-müller.md
+
+Konvention: Alle Personen bekommen Vorname+Nachname im Dateinamen 
+wenn bekannt. Kulturell bedingt bei persischer Familie (Mr./Mrs. + 
+Vorname + Nachname). Falls Nachname nicht bekannt: nur Vorname, 
+Datei kann später umbenannt werden.
+
+
+### Frontmatter-Felder (12 Felder in 5 Gruppen)
+
+**Gruppe 1 — Pflicht:**
+- type: entity
+- entity_type: person
+- name: <voller Anzeigename>
+
+**Gruppe 2 — Identität:**
+- aliases: [kurz_name, kose_name, ...] — wichtig für Voice-Memo-Erkennung
+- gender: male oder female — verpflichtend. Jarvis erschließt aus 
+  Namen oder fragt nach wenn unklar
+
+**Gruppe 3 — Anchor-Beziehung (Kern):**
+- rel_to_anchor: <direkte Beziehung zum Default-Anchor>
+- rel_via: <Vermittler-Person> — nur bei indirekten Beziehungen 
+  (uncle + via mother), bei direkten null
+- birth_order: <1/2/3/null> — nur bei Geschwistern oder Kindern
+
+**Gruppe 4 — Sonderrollen:**
+- is_anchor: false (nur majid-ahsan.md hat true)
+- is_primary_user: false (nur Hauptnutzer hat true)
+
+**Gruppe 5 — Auto-gepflegt (von Jarvis aktualisiert):**
+- first_mentioned: YYYY-MM-DD
+- last_mentioned: YYYY-MM-DD
+- mention_count: <integer>
+
+Plus: tags (automatisch extrahiert, wie bei Daily-Log)
+
+
+### Beziehungs-Vokabular für rel_to_anchor
+
+Standard-Werte (vollständige Liste folgt in späterer Session):
+- Direkte Familie: mother, father, spouse, son, daughter, sibling
+- Erweiterte Familie: uncle, aunt, cousin, nephew, niece, 
+  grandparent, grandchild, in-law
+- Nicht-familiär: friend, colleague, patient, neighbor, contact
+
+Multi-User-Kontext: Bei Queries von anderen Usern (Taha, Hossein) 
+wechselt der Query-Anchor temporär. Die rel_to_anchor-Werte in den 
+Dateien bleiben aber immer relativ zum Default-Anchor (Majid).
+
+
+### Text-Body-Struktur (6 feste Sektionen)
+
+Der Text-Body folgt einer festen Sektion-Struktur. Leere Sektionen 
+können weggelassen werden, aber die Reihenfolge ist konsistent.
+
+```markdown
+# <Name>
+
+## Persönliches
+Wohnort, Herkunft, familiäre Stellung, Alter wenn bekannt
+
+## Beruf
+Tätigkeit, Arbeitsstelle, beruflicher Werdegang
+
+## Gesundheit
+Krankheiten, Medikamente, Allergien, medizinische Besonderheiten
+
+## Familie
+Ehepartner, Kinder, familiäre Zusammenhänge
+
+## Kontakt
+Telefon, Adresse, Messenger, bevorzugte Kommunikationswege
+
+## Ereignisse
+Selektiv kuratierte narrative Chronik wichtiger Lebensereignisse
+```
+
+
+### Ereignisse-Sektion (kritisches Detail)
+
+Diese Sektion ist das narrative Gegenstück zu den statistischen 
+Feldern im Frontmatter. Unterschied:
+
+- Frontmatter (first_mentioned, last_mentioned, mention_count) = 
+  statistische Daten, maschinenlesbar
+- Text-Body Ereignisse-Sektion = erzählende Einträge mit Kontext
+
+Jarvis pflegt diese Sektion **selektiv**. Regel für was rein kommt:
+
+**Rein:**
+- Große Lebensereignisse (Heirat, Geburt, Tod, Scheidung)
+- Medizinische Ereignisse (Diagnose, Operation, Genesung)
+- Geographische Veränderungen (Umzug, Auswanderung)
+- Berufliche Meilensteine (Abschluss, Beförderung, Jobwechsel)
+- Beziehungs-relevante Events (Verlobung, erste Begegnung)
+
+**Nicht rein:**
+- Triviale Telefonate ("Reza hat angerufen" ohne wichtigen Inhalt)
+- Alltägliche Erwähnungen ohne Relevanz
+- Stimmungs-Beobachtungen ("war heute gut drauf")
+
+Raw-Details bleiben in den Daily-Logs, die Ereignisse-Sektion ist 
+eine kuratierte Mini-Biografie für schnellen Überblick.
+
+
+### Dual-Layer-Prinzip (Entity + Insights)
+
+Jede Person hat zwei parallele Dateien:
+
+1. **Entity-Datei** (memory/entities/<name>.md) — harte verifizierbare 
+   Fakten
+2. **Insights-Datei** (memory/insights/<name>.md) — erschlossene 
+   Charakter-Muster
+
+Die Trennung ist bewusst: Fakten sind überprüfbar, Insights sind 
+Interpretationen. Siehe Memory-Typ 2a für Details zur Insights-Datei.
+
+
+### Vollständiges Beispiel Entity-Datei
+
+Datei: /var/himes-data/memory/entities/reza-ahmadi.md
+
+```markdown
+---
+type: entity
+entity_type: person
+name: Reza Ahmadi
+aliases: [Reza, Onkel Reza, Reza Jan]
+gender: male
+rel_to_anchor: uncle
+rel_via: mother
+birth_order: null
+is_anchor: false
+is_primary_user: false
+first_mentioned: 2026-04-23
+last_mentioned: 2026-05-08
+mention_count: 7
+tags: [familie, medizin, iran]
+---
+
+# Reza Ahmadi
+
+## Persönliches
+Bruder von Majids Mutter Fatima. Wohnt in Teheran.
+Älterer Bruder von Fatima.
+
+## Beruf
+Arzt, Kardiologe. Eigene Praxis in Teheran seit 2015.
+
+## Gesundheit
+Diabetes Typ 2 seit 2019. Nimmt Metformin.
+
+## Familie
+Verheiratet mit Tahere. Tahere schwanger (Stand 2026-05-08).
+
+## Kontakt
+Telefon +98 xxx xxx
+
+## Ereignisse
+- 2019: Diabetes Typ 2 diagnostiziert
+- 2022: Heirat mit Tahere
+- 2026-05-08: Telefonat — Tahere ist schwanger
+```
+
+## Memory-Typ 2a: Insights-Datei
+
+**Definition:** Eine Insights-Datei speichert von Jarvis erschlossene 
+Charakter-Muster, Vorlieben und Gewohnheiten einer Person. Sie ist 
+die parallele Datei zur Entity-Datei und enthält weiche, 
+interpretative Informationen — nicht verifizierbare Fakten.
+
+
+### Zweck und Abgrenzung
+
+Entity-Datei enthält: "Reza ist Arzt" (überprüfbar)
+Insights-Datei enthält: "Reza ist großzügig" (erschlossen aus Mustern)
+
+Diese Trennung ist wichtig weil:
+- Fakten sind verifizierbar und wenig umstritten
+- Charakterzüge sind Interpretationen die falsch sein können
+
+Die Trennung verhindert dass weiche Schlussfolgerungen als harte 
+Fakten missverstanden werden.
+
+
+### Dateipfad und Benennung
+
+Pfad: /var/himes-data/memory/insights/<vorname-nachname>.md
+
+Derselbe Dateiname wie die Entity-Datei, nur in anderem Verzeichnis.
+
+
+### Frontmatter-Felder (6 Felder)
+
+- type: insights
+- entity: <vorname-nachname> — Referenz auf die Entity-Datei
+- generated_by: jarvis
+- confidence: low oder medium oder high — wie sicher ist Jarvis 
+  insgesamt bei diesen Insights
+- last_updated: YYYY-MM-DD
+- evidence_count: <integer> — wie viele Daily-Log-Erwähnungen sind 
+  die Basis
+
+
+### Text-Body (4 Sektionen)
+
+Die vier festen Sektionen:
+
+```markdown
+## Vorlieben
+Was die Person mag oder bevorzugt
+
+## Charaktermerkmale
+Persönlichkeits-Eigenschaften (großzügig, freundlich, etc.)
+
+## Gewohnheiten
+Verhaltensmuster (wann ruft sie an, was bringt sie mit, etc.)
+
+## Vermutungen (niedrige Konfidenz)
+Einschätzungen die Jarvis für wahrscheinlich hält aber nicht 
+sicher ist
+```
+
+
+### Keine Evidence-Referenzen
+
+Insights werden narrativ formuliert, nicht mit Fußnoten oder 
+Zählern belegt. Wenn Details zu einer Einschätzung gebraucht 
+werden, führt die Spur zurück zu den Daily-Logs über die 
+Erwähnungs-Statistik der Entity-Datei.
+
+
+### Pflege-Regeln
+
+- Jarvis aktualisiert Insights periodisch, nicht nach jedem 
+  Daily-Log
+- Bei Widerspruch zwischen alten und neuen Beobachtungen: Jarvis 
+  fragt nach oder revidiert
+- Insights beginnen in der Sektion "Vermutungen" und wandern bei 
+  genügend Bestätigung in "Charaktermerkmale" oder andere Sektionen
+
+
+### Vollständiges Beispiel Insights-Datei
+
+Datei: /var/himes-data/memory/insights/reza-ahmadi.md
+
+```markdown
+---
+type: insights
+entity: reza-ahmadi
+generated_by: jarvis
+confidence: medium
+last_updated: 2026-05-08
+evidence_count: 14
+---
+
+# Insights über Reza Ahmadi
+
+## Vorlieben
+Trinkt gerne Kaffee — bei allen gemeinsamen Treffen bestellt er 
+türkischen Kaffee. Mag klassische persische Musik, erwähnt das 
+regelmäßig in Gesprächen.
+
+## Charaktermerkmale
+Großzügig mit Geld und Zeit — zahlt oft für andere, bringt 
+Geschenke bei Besuchen. Durchgehend freundlich in allen erfassten 
+Interaktionen, keine negativen Erwähnungen.
+
+## Gewohnheiten
+Ruft meistens abends an, etwa 19:00 Teheran-Zeit. Bei Besuchen 
+bringt er traditionell Süßigkeiten mit.
+
+## Vermutungen (niedrige Konfidenz)
+Könnte einsamer sein als er zugibt — erwähnt häufig Vergangenheit 
+und alte Freunde. Scheint gesundheitlich besorgter zu sein als er 
+in Gesprächen äußert.
+```
+
 ## Offene Punkte für nächste Sessions
 
 - [ ] Beziehungs-Vokabular: Welche Werte sind in `rel_to_anchor` erlaubt?
 - [ ] Ableitungs-Regeln: Welche automatischen Schlüsse sind valide?
 - [ ] Initial-Daten-Strategie: Setup-Skript vs passives Lernen
-- [ ] Konkrete Templates pro Memory-Typ (Daily-Log ✓, Person ⬜, Ort ⬜, Medikament ⬜, Konzept ⬜, Meeting ⬜, Research ⬜, Conversation ⬜)
+- [ ] Konkrete Templates pro Memory-Typ (Daily-Log ✓, Person ✓, Ort ⬜, Medikament ⬜, Konzept ⬜, Meeting ⬜, Research ⬜, Conversation ⬜)
 - [ ] Erste Beispiel-Dateien mit echten Daten
 - [ ] Jarvis-Prompt-Regeln die Regel 9 umsetzen
 
@@ -324,3 +623,4 @@ mir was machen.
 - 2026-04-23: Initial. Die 10 Regeln festgelegt in Session mit Claude.
 - 2026-04-23: Daily-Log-Schema als erster konkreter Memory-Typ definiert. Dual-Layer-Prinzip (Memory-Frontmatter + Action-Tickets) etabliert.
 - 2026-04-23: Cleanup. Regel 10 Überschrift korrigiert (7 Typen → mehrere Typen). Event-Type-Werte strikt englisch (sozialer_kontakt → social_contact). Regel 5 um Enum-Klarstellung erweitert.
+- 2026-04-23: Entity-Person-Schema definiert. Dateinamen-Konvention (vorname-nachname.md), 12 Frontmatter-Felder in 5 Gruppen, 6-Sektionen-Text-Body. Insights-Datei-Schema als paralleler Memory-Typ 2a eingeführt. Dual-Datei-Prinzip (Entity für Fakten, Insights für Charakter-Muster) etabliert.
