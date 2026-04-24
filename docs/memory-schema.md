@@ -1,7 +1,7 @@
 # HiMeS Memory-Schema
 
 **Stand:** 2026-04-23
-**Status:** Phase 1 konzeptionell abgeschlossen
+**Status:** Phase 2.1 in Arbeit — 3 von 8 Memory-Typen definiert (Daily-Log, Entity-Person, Insights)
 
 Dieses Dokument definiert wie Memory in HiMeS strukturiert ist.
 Es ist die Referenz für:
@@ -37,8 +37,9 @@ Jahres-Annahmen: nächstliegendes plausibles Jahr, nicht 1938.
 
 ### Regel 3 — Entity-Erkennung automatisch, keine Wikilinks nötig
 
-Entity-Dateien heißen nach realem Namen: `taha.md`, `reza.md`, 
-`fatima.md`. Der Nutzer schreibt natürliche Prosa im Voice-Memo 
+Entity-Dateien heißen nach dem Format vorname-nachname.md (siehe 
+Memory-Typ 2 für Details): `taha-ahsan.md`, `reza-ahmadi.md`, 
+`fatima-ahmadi.md`. Der Nutzer schreibt natürliche Prosa im Voice-Memo 
 ("Taha hatte Fieber") und muss keine `[[Klammern]]` setzen.
 
 Cognee und Jarvis erkennen Namen beim Ingesten automatisch und 
@@ -387,7 +388,7 @@ Der Text-Body folgt einer festen Sektion-Struktur. Leere Sektionen
 können weggelassen werden, aber die Reihenfolge ist konsistent.
 
 ```markdown
-# <Name>
+# <name>
 
 ## Persönliches
 Wohnort, Herkunft, familiäre Stellung, Alter wenn bekannt
@@ -611,7 +612,7 @@ in Gesprächen äußert.
 
 ## Offene Punkte für nächste Sessions
 
-- [ ] Beziehungs-Vokabular: Welche Werte sind in `rel_to_anchor` erlaubt?
+- [ ] Beziehungs-Vokabular: Vollständige Liste festlegen (Standard-Werte sind bereits in Memory-Typ 2 dokumentiert, vollständige Enum-Liste folgt)
 - [ ] Ableitungs-Regeln: Welche automatischen Schlüsse sind valide?
 - [ ] Initial-Daten-Strategie: Setup-Skript vs passives Lernen
 - [ ] Konkrete Templates pro Memory-Typ (Daily-Log ✓, Person ✓, Ort ⬜, Medikament ⬜, Konzept ⬜, Meeting ⬜, Research ⬜, Conversation ⬜)
@@ -624,3 +625,4 @@ in Gesprächen äußert.
 - 2026-04-23: Daily-Log-Schema als erster konkreter Memory-Typ definiert. Dual-Layer-Prinzip (Memory-Frontmatter + Action-Tickets) etabliert.
 - 2026-04-23: Cleanup. Regel 10 Überschrift korrigiert (7 Typen → mehrere Typen). Event-Type-Werte strikt englisch (sozialer_kontakt → social_contact). Regel 5 um Enum-Klarstellung erweitert.
 - 2026-04-23: Entity-Person-Schema definiert. Dateinamen-Konvention (vorname-nachname.md), 12 Frontmatter-Felder in 5 Gruppen, 6-Sektionen-Text-Body. Insights-Datei-Schema als paralleler Memory-Typ 2a eingeführt. Dual-Datei-Prinzip (Entity für Fakten, Insights für Charakter-Muster) etabliert.
+- 2026-04-23: Cleanup. Regel 3 auf neue Dateinamen-Konvention (vorname-nachname.md) aktualisiert. Platzhalter `<n>` zu `<name>` an drei Stellen korrigiert. Header-Status auf Phase 2.1 aktualisiert. Offene-Punkte-Eintrag für Beziehungs-Vokabular präzisiert.
