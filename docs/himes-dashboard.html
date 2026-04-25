@@ -1,0 +1,1520 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HiMeS — Live Dashboard</title>
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: #14171f;
+    --panel-2: #1c202a;
+    --panel-3: #232834;
+    --border: #2a2f3a;
+    --border-2: #353b48;
+    --text: #e6e9ef;
+    --muted: #8b93a3;
+    --muted-2: #5d6573;
+    --green: #3ecf8e;
+    --green-bg: rgba(62, 207, 142, 0.12);
+    --orange: #f59e0b;
+    --orange-bg: rgba(245, 158, 11, 0.12);
+    --gray: #4b5563;
+    --blue: #60a5fa;
+    --blue-bg: rgba(96, 165, 250, 0.12);
+    --red: #ef4444;
+    --red-bg: rgba(239, 68, 68, 0.12);
+    --purple: #a78bfa;
+    --purple-bg: rgba(167, 139, 250, 0.12);
+    --sidebar-w: 240px;
+    --header-h: 56px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+    font-size: 14px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* =================== HEADER =================== */
+  header {
+    height: var(--header-h);
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 16px;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  .logo { font-weight: 700; font-size: 15px; letter-spacing: -0.3px; }
+  .logo span { color: var(--blue); }
+  .header-meta { color: var(--muted); font-size: 12px; }
+  .header-controls { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .btn {
+    background: var(--panel-3);
+    border: 1px solid var(--border-2);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.15s;
+  }
+  .btn:hover { background: var(--border-2); }
+  .btn.primary { background: var(--blue); color: #000; border-color: var(--blue); font-weight: 600; }
+  .btn.primary:hover { background: #4a93e8; }
+  .input {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: inherit;
+    width: 220px;
+  }
+  .input:focus { outline: none; border-color: var(--blue); }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--gray);
+    transition: background 0.3s;
+  }
+  .status-dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-dot.error { background: var(--red); }
+  .status-dot.loading { background: var(--orange); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  /* =================== LAYOUT =================== */
+  .layout {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+  .sidebar {
+    width: var(--sidebar-w);
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    flex-shrink: 0;
+    padding: 16px 0;
+  }
+  .nav-section {
+    color: var(--muted-2);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 12px 20px 6px;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 20px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text);
+    transition: background 0.1s;
+    border-left: 3px solid transparent;
+  }
+  .nav-item:hover { background: var(--panel-2); }
+  .nav-item.active {
+    background: var(--panel-2);
+    border-left-color: var(--blue);
+    color: var(--blue);
+    font-weight: 600;
+  }
+  .nav-item .nav-count {
+    margin-left: auto;
+    background: var(--panel-3);
+    color: var(--muted);
+    font-size: 11px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+  .nav-item.active .nav-count { background: rgba(96, 165, 250, 0.2); color: var(--blue); }
+
+  .main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 32px;
+  }
+
+  /* =================== PAGES =================== */
+  .page { display: none; max-width: 1300px; margin: 0 auto; }
+  .page.active { display: block; }
+  .page-title {
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .page-subtitle {
+    color: var(--muted);
+    margin-bottom: 24px;
+    font-size: 13px;
+  }
+  .section-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 24px 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-title:first-child { margin-top: 0; }
+
+  /* =================== STATS =================== */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--gray);
+  }
+  .stat-card.done::before { background: var(--green); }
+  .stat-card.prog::before { background: var(--orange); }
+  .stat-card.open::before { background: var(--gray); }
+  .stat-card.total::before { background: var(--blue); }
+  .stat-num { font-size: 28px; font-weight: 700; line-height: 1; }
+  .stat-card.done .stat-num { color: var(--green); }
+  .stat-card.prog .stat-num { color: var(--orange); }
+  .stat-card.open .stat-num { color: var(--text); }
+  .stat-card.total .stat-num { color: var(--blue); }
+  .stat-lbl { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* =================== PROGRESS =================== */
+  .progress-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    margin-bottom: 24px;
+  }
+  .progress-bar {
+    height: 22px;
+    background: var(--panel-3);
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+    margin-top: 10px;
+  }
+  .progress-bar div {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .pb-done { background: var(--green); color: #042; }
+  .pb-prog { background: var(--orange); color: #421; }
+  .pb-open { background: var(--gray); color: #fff; }
+
+  /* =================== TASK ROWS =================== */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .panel-head {
+    padding: 14px 18px;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .panel-title { font-weight: 600; font-size: 14px; }
+  .panel-body { padding: 4px 0; }
+
+  .task {
+    display: grid;
+    grid-template-columns: 28px 80px 1fr;
+    gap: 12px;
+    align-items: start;
+    padding: 10px 18px;
+    border-top: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  .panel-body > .task:first-child { border-top: none; }
+  .task:hover { background: var(--panel-2); }
+  .task .icon { font-size: 14px; padding-top: 2px; }
+  .task .id { color: var(--muted); font-family: ui-monospace, "SF Mono", monospace; font-size: 12px; padding-top: 2px; }
+  .task .body { font-size: 13px; }
+  .task .body-name { color: var(--text); }
+  .task .body-name b { font-weight: 600; }
+  .task .body-next { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .task.done .body-name { color: var(--muted); }
+  .task.next-up { background: var(--orange-bg); }
+  .task.next-up .body-name b::after {
+    content: " ← NÄCHSTER SCHRITT";
+    color: var(--orange);
+    font-size: 10px;
+    font-weight: 700;
+    margin-left: 6px;
+  }
+
+  /* =================== ROADMAP / FLOW =================== */
+  .roadmap {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 24px;
+  }
+  .step {
+    padding: 6px 12px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .step.done { background: var(--green-bg); color: var(--green); border: 1px solid rgba(62, 207, 142, 0.25); text-decoration: line-through; opacity: 0.7; }
+  .step.now { background: var(--orange); color: #000; font-weight: 700; box-shadow: 0 0 0 3px var(--orange-bg); }
+  .step.todo { background: var(--panel-3); color: var(--muted); border: 1px solid var(--border); }
+  .arrow { color: var(--muted-2); font-size: 12px; }
+
+  /* =================== GANTT =================== */
+  .gantt-wrap {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    overflow-x: auto;
+  }
+  .gantt-row {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 12px;
+    align-items: center;
+    padding: 6px 0;
+    border-top: 1px solid var(--border);
+    min-width: 800px;
+  }
+  .gantt-row:first-child { border-top: none; }
+  .gantt-label {
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .gantt-label b { display: block; color: var(--text); }
+  .gantt-label span { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; }
+  .gantt-track {
+    position: relative;
+    height: 22px;
+    background: var(--panel-3);
+    border-radius: 4px;
+  }
+  .gantt-bar {
+    position: absolute;
+    top: 0; bottom: 0;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    font-size: 10px;
+    font-weight: 600;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .gantt-bar.done { background: var(--green); color: #042; }
+  .gantt-bar.prog { background: var(--orange); color: #421; }
+  .gantt-bar.open { background: var(--blue-bg); border: 1px dashed var(--blue); color: var(--blue); }
+  .gantt-header {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 12px;
+    padding: 0 0 8px;
+    border-bottom: 1px solid var(--border-2);
+    margin-bottom: 8px;
+    min-width: 800px;
+  }
+  .gantt-months {
+    display: flex;
+    justify-content: space-between;
+    color: var(--muted);
+    font-size: 11px;
+    padding: 0 4px;
+  }
+
+  /* =================== MCP =================== */
+  .mcp-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+  }
+  .mcp {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    border-left: 3px solid var(--gray);
+  }
+  .mcp.active { border-left-color: var(--green); }
+  .mcp.pending { border-left-color: var(--orange); opacity: 0.85; }
+  .mcp.planned { border-left-color: var(--blue); opacity: 0.7; }
+  .mcp-name { font-weight: 600; font-size: 13px; }
+  .mcp-desc { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .mcp-status {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 8px;
+    text-transform: uppercase;
+    margin-top: 6px;
+  }
+  .mcp.active .mcp-status { background: var(--green-bg); color: var(--green); }
+  .mcp.pending .mcp-status { background: var(--orange-bg); color: var(--orange); }
+  .mcp.planned .mcp-status { background: var(--blue-bg); color: var(--blue); }
+
+  /* =================== ADR =================== */
+  .adr-list { display: flex; flex-direction: column; gap: 8px; }
+  .adr {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    display: grid;
+    grid-template-columns: 50px 1fr auto;
+    gap: 12px;
+    align-items: start;
+  }
+  .adr-num {
+    font-family: ui-monospace, monospace;
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .adr-text { font-size: 13px; }
+  .adr-status {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 10px;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .adr-status.aktiv { background: var(--green-bg); color: var(--green); }
+  .adr-status.geplant { background: var(--blue-bg); color: var(--blue); }
+  .adr-status.akzeptiert { background: var(--purple-bg); color: var(--purple); }
+  .adr-status.ersetzt { background: var(--red-bg); color: var(--red); opacity: 0.7; }
+  .adr-status.diskussion { background: var(--orange-bg); color: var(--orange); }
+
+  /* =================== CHANGELOG =================== */
+  .changelog { display: flex; flex-direction: column; gap: 10px; }
+  .changelog-entry {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    display: grid;
+    grid-template-columns: 100px 60px 1fr;
+    gap: 12px;
+    font-size: 13px;
+  }
+  .changelog-date { color: var(--blue); font-family: ui-monospace, monospace; font-size: 12px; font-weight: 600; }
+  .changelog-ver { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
+  .changelog-text { color: var(--text); }
+
+  /* =================== HIGHLIGHTS =================== */
+  .highlight {
+    background: linear-gradient(135deg, var(--orange-bg), rgba(245, 158, 11, 0.02));
+    border-left: 3px solid var(--orange);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 16px 0;
+    font-size: 13px;
+  }
+  .highlight strong { color: var(--orange); }
+  .info-box {
+    background: var(--blue-bg);
+    border-left: 3px solid var(--blue);
+    border-radius: 6px;
+    padding: 12px 16px;
+    margin: 16px 0;
+    font-size: 13px;
+  }
+  .info-box strong { color: var(--blue); }
+
+  /* =================== EMPTY / LOADING =================== */
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+  .empty-state h3 { color: var(--text); margin-bottom: 8px; }
+  .drop-zone {
+    border: 2px dashed var(--border-2);
+    border-radius: 12px;
+    padding: 40px;
+    text-align: center;
+    margin: 20px auto;
+    max-width: 500px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: var(--blue);
+    background: var(--blue-bg);
+  }
+
+  /* =================== SETTINGS =================== */
+  .settings-form {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    max-width: 600px;
+  }
+  .form-group { margin-bottom: 16px; }
+  .form-group label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600; }
+  .form-group input {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .form-group input:focus { outline: none; border-color: var(--blue); }
+  .form-help { font-size: 11px; color: var(--muted-2); margin-top: 4px; }
+
+  /* =================== SCROLLBAR =================== */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--panel); }
+  ::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted-2); }
+
+  /* =================== RESPONSIVE =================== */
+  @media (max-width: 768px) {
+    .sidebar { display: none; }
+    .main { padding: 16px; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .task { grid-template-columns: 24px 60px 1fr; }
+    .changelog-entry { grid-template-columns: 1fr; gap: 4px; }
+    .adr { grid-template-columns: 1fr; }
+    .gantt-row, .gantt-header { grid-template-columns: 120px 1fr; min-width: 600px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Hi<span>MeS</span> Dashboard</div>
+  <div class="header-meta" id="lastUpdate">—</div>
+  <div class="header-controls">
+    <input type="text" class="input" id="searchInput" placeholder="🔍 Suchen…">
+    <div class="status-dot" id="statusDot"></div>
+    <button class="btn" id="refreshBtn">↻ Refresh</button>
+    <button class="btn primary" id="settingsBtn">⚙ Repo</button>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="sidebar" id="sidebar">
+    <div class="nav-section">Übersicht</div>
+    <div class="nav-item active" data-page="overview">📊 Status</div>
+    <div class="nav-item" data-page="roadmap">🗺️ Roadmap</div>
+    <div class="nav-item" data-page="gantt">📅 Zeitstrahl</div>
+
+    <div class="nav-section">Phasen</div>
+    <div class="nav-item" data-page="phase15">⚙️ Phase 1.5 <span class="nav-count" id="cnt15">—</span></div>
+    <div class="nav-item" data-page="phase2">🚀 Phase 2 <span class="nav-count" id="cnt2">—</span></div>
+    <div class="nav-item" data-page="phase3">🌟 Phase 3 <span class="nav-count" id="cnt3">—</span></div>
+
+    <div class="nav-section">Technik</div>
+    <div class="nav-item" data-page="mcp">🔌 MCP-Server <span class="nav-count" id="cntMcp">—</span></div>
+    <div class="nav-item" data-page="adr">📋 ADRs <span class="nav-count" id="cntAdr">—</span></div>
+    <div class="nav-item" data-page="changelog">📜 Changelog <span class="nav-count" id="cntCl">—</span></div>
+
+    <div class="nav-section">Meta</div>
+    <div class="nav-item" data-page="raw">📄 Rohtext</div>
+    <div class="nav-item" data-page="settings">⚙️ Einstellungen</div>
+  </nav>
+
+  <main class="main" id="main">
+    <!-- OVERVIEW -->
+    <div class="page active" id="page-overview">
+      <h1 class="page-title">Projekt-Status</h1>
+      <p class="page-subtitle" id="overviewSubtitle">Lade Daten…</p>
+
+      <div class="stats-grid" id="statsGrid"></div>
+      <div id="overviewProgress"></div>
+      <div id="overviewHighlight"></div>
+
+      <h2 class="section-title">🎯 Aktuelle Tasks</h2>
+      <div id="overviewCurrent"></div>
+
+      <h2 class="section-title">⬜ Nächste Schritte</h2>
+      <div id="overviewNext"></div>
+    </div>
+
+    <!-- ROADMAP -->
+    <div class="page" id="page-roadmap">
+      <h1 class="page-title">Roadmap</h1>
+      <p class="page-subtitle">Empfohlene Reihenfolge der nächsten Schritte</p>
+      <div id="roadmapContent"></div>
+    </div>
+
+    <!-- GANTT -->
+    <div class="page" id="page-gantt">
+      <h1 class="page-title">Zeitstrahl / Gantt</h1>
+      <p class="page-subtitle">Geschätzte Dauern und Abhängigkeiten</p>
+      <div id="ganttContent"></div>
+    </div>
+
+    <!-- PHASE 1.5 -->
+    <div class="page" id="page-phase15">
+      <h1 class="page-title">Phase 1.5 — Stabilisierung</h1>
+      <p class="page-subtitle" id="phase15Sub">—</p>
+      <div id="phase15Content"></div>
+    </div>
+
+    <!-- PHASE 2 -->
+    <div class="page" id="page-phase2">
+      <h1 class="page-title">Phase 2 — Memory + Skills</h1>
+      <p class="page-subtitle">Geplante Features für die nächste Phase</p>
+      <div id="phase2Content"></div>
+    </div>
+
+    <!-- PHASE 3 -->
+    <div class="page" id="page-phase3">
+      <h1 class="page-title">Phase 3 — Vision</h1>
+      <p class="page-subtitle">Langfristige Ziele</p>
+      <div id="phase3Content"></div>
+    </div>
+
+    <!-- MCP -->
+    <div class="page" id="page-mcp">
+      <h1 class="page-title">MCP-Server</h1>
+      <p class="page-subtitle" id="mcpSub">—</p>
+      <div id="mcpContent"></div>
+    </div>
+
+    <!-- ADR -->
+    <div class="page" id="page-adr">
+      <h1 class="page-title">Architektur-Entscheidungen (ADRs)</h1>
+      <p class="page-subtitle" id="adrSub">—</p>
+      <div id="adrContent"></div>
+    </div>
+
+    <!-- CHANGELOG -->
+    <div class="page" id="page-changelog">
+      <h1 class="page-title">Changelog</h1>
+      <p class="page-subtitle" id="changelogSub">—</p>
+      <div id="changelogContent"></div>
+    </div>
+
+    <!-- RAW -->
+    <div class="page" id="page-raw">
+      <h1 class="page-title">Rohtext der Master-Reference</h1>
+      <p class="page-subtitle">Volle Markdown-Datei</p>
+      <pre id="rawContent" style="background: var(--panel); border: 1px solid var(--border); padding: 16px; border-radius: 8px; white-space: pre-wrap; font-size: 12px; line-height: 1.6; font-family: ui-monospace, monospace; max-height: 70vh; overflow-y: auto;"></pre>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="page" id="page-settings">
+      <h1 class="page-title">Einstellungen</h1>
+      <p class="page-subtitle">Konfiguriere die Quelle deiner MASTER-REFERENCE.md</p>
+
+      <div class="settings-form">
+        <h2 class="section-title">📡 GitHub Quelle</h2>
+        <div class="form-group">
+          <label>GitHub User / Organisation</label>
+          <input type="text" id="ghUser" placeholder="z.B. majidahsan">
+          <div class="form-help">Dein GitHub-Benutzername</div>
+        </div>
+        <div class="form-group">
+          <label>Repository</label>
+          <input type="text" id="ghRepo" placeholder="z.B. himes">
+          <div class="form-help">Name des Repositories</div>
+        </div>
+        <div class="form-group">
+          <label>Branch</label>
+          <input type="text" id="ghBranch" placeholder="main" value="main">
+        </div>
+        <div class="form-group">
+          <label>Pfad zur Datei</label>
+          <input type="text" id="ghPath" placeholder="docs/MASTER-REFERENCE.md" value="docs/MASTER-REFERENCE.md">
+          <div class="form-help">Relativ zum Repo-Root</div>
+        </div>
+        <div class="form-group">
+          <label>Auto-Refresh Intervall (Minuten, 0 = aus)</label>
+          <input type="number" id="autoRefresh" placeholder="5" value="5" min="0" max="60">
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 20px;">
+          <button class="btn primary" id="saveSettings">Speichern + Laden</button>
+          <button class="btn" id="testFetch">Test Fetch</button>
+        </div>
+
+        <h2 class="section-title" style="margin-top: 32px;">📁 Manueller Upload</h2>
+        <div class="drop-zone" id="dropZone">
+          <div style="font-size: 32px; margin-bottom: 8px;">📁</div>
+          <div><b>Datei hier reinziehen</b> oder klicken zum Auswählen</div>
+          <div class="form-help" style="margin-top: 8px;">Falls dein Repo privat ist oder du offline arbeitest</div>
+          <input type="file" id="fileInput" accept=".md,.txt" style="display: none;">
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+// ============================================================
+// CONFIG & STATE
+// ============================================================
+const DEFAULT_CONFIG = {
+  ghUser: '',
+  ghRepo: '',
+  ghBranch: 'main',
+  ghPath: 'docs/MASTER-REFERENCE.md',
+  autoRefresh: 5
+};
+
+let CONFIG = { ...DEFAULT_CONFIG, ...(loadConfigFromUrl() || loadConfigFromMemory() || {}) };
+let DATA = null;
+let RAW_TEXT = '';
+let REFRESH_TIMER = null;
+
+function loadConfigFromMemory() {
+  // In-memory only since artifacts can't use localStorage
+  return window._himesConfig || null;
+}
+function saveConfigToMemory(cfg) {
+  window._himesConfig = cfg;
+  // Also encode into URL hash for persistence across reloads
+  const params = new URLSearchParams();
+  Object.entries(cfg).forEach(([k, v]) => params.set(k, v));
+  history.replaceState(null, '', '#' + params.toString());
+}
+function loadConfigFromUrl() {
+  const hash = location.hash.slice(1);
+  if (!hash) return null;
+  const params = new URLSearchParams(hash);
+  const cfg = {};
+  for (const [k, v] of params) cfg[k] = v;
+  return Object.keys(cfg).length ? cfg : null;
+}
+
+// ============================================================
+// MARKDOWN PARSER
+// ============================================================
+function parseMarkdown(md) {
+  const data = {
+    version: '',
+    date: '',
+    activePhase: '',
+    summary: '',
+    statusTable: [],     // Phase 1.5 tasks
+    phase2: [],          // Phase 2 features
+    phase3: [],          // Phase 3 visions
+    mcp: [],             // MCP servers
+    adrs: [],            // ADRs
+    changelog: [],       // Changelog entries
+    roadmapOrder: '',    // Roadmap reihenfolge string
+    todayWork: '',       // 1a section
+    highlights: []       // Key info blocks
+  };
+
+  // === Header / Version ===
+  const verMatch = md.match(/\*\*Version:\*\*\s*([^·\n]+)/);
+  if (verMatch) data.version = verMatch[1].trim();
+  const dateMatch = md.match(/\*\*Stand:\*\*\s*([^\n·]+)/);
+  if (dateMatch) data.date = dateMatch[1].trim();
+
+  // === Active Phase Summary ===
+  const phaseMatch = md.match(/\*\*Phase:\*\*\s*([^·\n]+)/);
+  if (phaseMatch) data.activePhase = phaseMatch[1].trim();
+  const summaryLine = md.match(/\*\*Phase:\*\*[^\n]+/);
+  if (summaryLine) data.summary = summaryLine[0].replace(/\*\*/g, '');
+
+  // === Status Table (Phase 1.5) ===
+  const statusSec = extractSection(md, '## 1. AKTUELLER STATUS', '## 1a.');
+  if (statusSec) {
+    const rows = parseTable(statusSec);
+    data.statusTable = rows.filter(r => r.length >= 4 && /^\d/.test(r[0])).map(r => ({
+      id: r[0].trim(),
+      task: r[1].trim(),
+      status: parseStatusEmoji(r[2].trim()),
+      statusRaw: r[2].trim(),
+      next: r[3].trim()
+    }));
+  }
+
+  // === Roadmap order ===
+  const roadmapMatch = md.match(/\*\*Empfohlene Reihenfolge:\*\*\s*([^\n]+)/);
+  if (roadmapMatch) data.roadmapOrder = roadmapMatch[1].trim();
+
+  // === Phase 2 ===
+  const phase2Sec = extractSection(md, '## 8. PHASE 2', '### Phase 2.1');
+  if (phase2Sec) {
+    const rows = parseTable(phase2Sec);
+    data.phase2 = rows.filter(r => r.length >= 5 && /^\d/.test(r[0])).map(r => ({
+      id: r[0].trim(),
+      feature: r[1].trim(),
+      depends: r[2].trim(),
+      mcp: r[3].trim(),
+      desc: r[4].trim()
+    }));
+  }
+
+  // === Phase 3 ===
+  const phase3Sec = extractSection(md, '## 9. PHASE 3', '## 10.');
+  if (phase3Sec) {
+    const lines = phase3Sec.split('\n').filter(l => l.trim());
+    data.phase3.push({ desc: lines.find(l => !l.startsWith('#') && !l.startsWith('|') && l.length > 30) || '' });
+    const rows = parseTable(phase3Sec);
+    rows.filter(r => r.length >= 3 && /^\d/.test(r[0])).forEach(r => {
+      data.phase3.push({ id: r[0].trim(), feature: r[1].trim(), desc: r[2].trim() });
+    });
+  }
+
+  // === MCP Catalog ===
+  const mcpSec = extractSection(md, '## 5. MCP-KATALOG', '## 6.');
+  if (mcpSec) {
+    const rows = parseTable(mcpSec);
+    data.mcp = rows.filter(r => r.length >= 3 && r[0].trim() && !r[0].includes('---'))
+      .map(r => ({
+        name: r[0].trim().replace(/[`*]/g, ''),
+        status: r[1].trim(),
+        desc: r.slice(2).join(' · ').trim()
+      }));
+  }
+  // Also infer from active phase summary "6 MCP aktiv"
+  const mcpCountMatch = md.match(/(\d+)\s*MCP\s*aktiv/i);
+  if (mcpCountMatch) data.mcpActiveCount = parseInt(mcpCountMatch[1]);
+
+  // === ADRs ===
+  const adrSec = extractSection(md, '## 13. ADR', '## 14.');
+  if (adrSec) {
+    const rows = parseTable(adrSec);
+    data.adrs = rows.filter(r => r.length >= 3 && /^\d+$/.test(r[0].trim())).map(r => ({
+      num: r[0].trim(),
+      decision: r[1].trim(),
+      status: r[2].trim()
+    }));
+  }
+
+  // === Changelog ===
+  const clSec = extractSection(md, '## 15. CHANGELOG', null);
+  if (clSec) {
+    const rows = parseTable(clSec);
+    data.changelog = rows.filter(r => r.length >= 3 && /^\d{4}-\d{2}-\d{2}/.test(r[0].trim())).map(r => ({
+      date: r[0].trim(),
+      version: r[1].trim(),
+      text: r[2].trim()
+    })).sort((a, b) => {
+      // Sort by date desc, then by version desc
+      if (a.date !== b.date) return b.date.localeCompare(a.date);
+      const va = parseFloat(a.version) || 0;
+      const vb = parseFloat(b.version) || 0;
+      return vb - va;
+    });
+  }
+
+  // === Today's work / highlights ===
+  const todaySec = extractSection(md, '## 1a.', '## 1b.');
+  if (todaySec) data.todayWork = todaySec.slice(0, 1500);
+
+  return data;
+}
+
+function extractSection(md, startMarker, endMarker) {
+  const startIdx = md.indexOf(startMarker);
+  if (startIdx === -1) return null;
+  let endIdx = md.length;
+  if (endMarker) {
+    const found = md.indexOf(endMarker, startIdx + startMarker.length);
+    if (found !== -1) endIdx = found;
+  }
+  return md.slice(startIdx, endIdx);
+}
+
+function parseTable(text) {
+  const lines = text.split('\n');
+  const rows = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('|')) continue;
+    if (/^\|[\s\-|:]+\|$/.test(trimmed)) continue; // separator
+    const cells = trimmed.split('|').slice(1, -1).map(c => c.trim());
+    if (cells.length === 0) continue;
+    rows.push(cells);
+  }
+  return rows;
+}
+
+function parseStatusEmoji(s) {
+  if (s.includes('✅')) return 'done';
+  if (s.includes('🔶')) return 'progress';
+  if (s.includes('⬜')) return 'open';
+  return 'unknown';
+}
+
+// ============================================================
+// FETCH
+// ============================================================
+async function fetchFromGitHub() {
+  if (!CONFIG.ghUser || !CONFIG.ghRepo) {
+    setStatus('error', 'Kein Repo konfiguriert');
+    return null;
+  }
+  const url = `https://raw.githubusercontent.com/${CONFIG.ghUser}/${CONFIG.ghRepo}/${CONFIG.ghBranch}/${CONFIG.ghPath}`;
+  setStatus('loading', 'Lade…');
+  try {
+    const r = await fetch(url + '?t=' + Date.now()); // cache-bust
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const text = await r.text();
+    setStatus('live', `Aktualisiert: ${new Date().toLocaleTimeString('de-DE')}`);
+    return text;
+  } catch (e) {
+    setStatus('error', `Fehler: ${e.message}`);
+    return null;
+  }
+}
+
+function setStatus(state, text) {
+  const dot = document.getElementById('statusDot');
+  dot.className = 'status-dot ' + state;
+  document.getElementById('lastUpdate').textContent = text;
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function renderAll() {
+  if (!DATA) {
+    document.getElementById('overviewSubtitle').textContent = 'Bitte konfiguriere ein Repo unter ⚙ Einstellungen oder ziehe eine Datei rein';
+    return;
+  }
+
+  renderOverview();
+  renderRoadmap();
+  renderGantt();
+  renderPhase15();
+  renderPhase2();
+  renderPhase3();
+  renderMcp();
+  renderAdr();
+  renderChangelog();
+  renderRaw();
+
+  // Update sidebar counts
+  document.getElementById('cnt15').textContent = DATA.statusTable.length;
+  document.getElementById('cnt2').textContent = DATA.phase2.length;
+  document.getElementById('cnt3').textContent = DATA.phase3.length;
+  document.getElementById('cntMcp').textContent = DATA.mcp.length || (DATA.mcpActiveCount || 0);
+  document.getElementById('cntAdr').textContent = DATA.adrs.length;
+  document.getElementById('cntCl').textContent = DATA.changelog.length;
+}
+
+function renderOverview() {
+  const counts = countStatuses(DATA.statusTable);
+  const total = DATA.statusTable.length;
+  const subtitle = `${DATA.version || 'Unbekannte Version'} · Stand ${DATA.date || '—'} · ${DATA.activePhase || 'Phase unbekannt'}`;
+  document.getElementById('overviewSubtitle').textContent = subtitle;
+
+  // Stats
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card done"><div class="stat-num">${counts.done}</div><div class="stat-lbl">Erledigt ✅</div></div>
+    <div class="stat-card prog"><div class="stat-num">${counts.progress}</div><div class="stat-lbl">In Arbeit 🔶</div></div>
+    <div class="stat-card open"><div class="stat-num">${counts.open}</div><div class="stat-lbl">Offen ⬜</div></div>
+    <div class="stat-card total"><div class="stat-num">${total}</div><div class="stat-lbl">Gesamt</div></div>
+  `;
+
+  // Progress
+  const donePct = Math.round((counts.done / total) * 100);
+  const progPct = Math.round((counts.progress / total) * 100);
+  const openPct = 100 - donePct - progPct;
+  document.getElementById('overviewProgress').innerHTML = `
+    <div class="progress-card">
+      <div style="font-weight: 600; margin-bottom: 4px;">Fortschritt Phase 1.5</div>
+      <div style="color: var(--muted); font-size: 12px;">${counts.done} von ${total} Tasks erledigt</div>
+      <div class="progress-bar">
+        ${donePct > 5 ? `<div class="pb-done" style="width:${donePct}%">${donePct}%</div>` : ''}
+        ${progPct > 5 ? `<div class="pb-prog" style="width:${progPct}%">${progPct}%</div>` : ''}
+        ${openPct > 5 ? `<div class="pb-open" style="width:${openPct}%">${openPct}%</div>` : ''}
+      </div>
+    </div>
+  `;
+
+  // Find next task from roadmap
+  const nextTaskMatch = DATA.roadmapOrder.match(/\*\*([^*]+)\*\*/);
+  const nextTask = nextTaskMatch ? nextTaskMatch[1].trim() : '';
+  document.getElementById('overviewHighlight').innerHTML = nextTask ? `
+    <div class="highlight">
+      <strong>🎯 Aktueller Fokus:</strong> ${escapeHtml(nextTask)}.
+      ${DATA.roadmapOrder ? `<div style="margin-top: 6px; color: var(--muted); font-size: 12px;">${escapeHtml(DATA.roadmapOrder.substring(0, 200))}…</div>` : ''}
+    </div>
+  ` : '';
+
+  // Current (in progress)
+  const inProg = DATA.statusTable.filter(t => t.status === 'progress');
+  document.getElementById('overviewCurrent').innerHTML = inProg.length ? `
+    <div class="panel"><div class="panel-body">${inProg.map(renderTaskRow).join('')}</div></div>
+  ` : '<p style="color: var(--muted); font-size: 13px;">Aktuell keine Tasks in Arbeit</p>';
+
+  // Next 5 open tasks (priority by roadmap order)
+  const nextTasks = DATA.statusTable.filter(t => t.status === 'open').slice(0, 8);
+  document.getElementById('overviewNext').innerHTML = `
+    <div class="panel"><div class="panel-body">${nextTasks.map(renderTaskRow).join('')}</div></div>
+  `;
+}
+
+function renderTaskRow(t, isNextUp = false) {
+  const iconMap = { done: '✅', progress: '🔶', open: '⬜' };
+  const cls = t.status === 'done' ? 'done' : '';
+  return `
+    <div class="task ${cls} ${isNextUp ? 'next-up' : ''}">
+      <div class="icon">${iconMap[t.status] || '·'}</div>
+      <div class="id">${escapeHtml(t.id)}</div>
+      <div class="body">
+        <div class="body-name"><b>${escapeHtml(t.task)}</b></div>
+        ${t.next && t.next !== '—' ? `<div class="body-next">${escapeHtml(t.next.substring(0, 250))}${t.next.length > 250 ? '…' : ''}</div>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function countStatuses(tasks) {
+  const c = { done: 0, progress: 0, open: 0 };
+  tasks.forEach(t => { if (c[t.status] !== undefined) c[t.status]++; });
+  return c;
+}
+
+function renderRoadmap() {
+  if (!DATA.roadmapOrder) {
+    document.getElementById('roadmapContent').innerHTML = '<p style="color:var(--muted)">Keine Roadmap-Reihenfolge in der Master-Reference gefunden.</p>';
+    return;
+  }
+  // Parse: ~~1.5.x~~ → **1.5.y** → 1.5.z
+  const tokens = DATA.roadmapOrder.split('→').map(t => t.trim());
+  const steps = tokens.map(t => {
+    if (t.startsWith('~~') && t.endsWith('~~')) {
+      return { type: 'done', label: t.replace(/~~/g, '').trim() };
+    } else if (t.includes('**')) {
+      const m = t.match(/\*\*([^*]+)\*\*/);
+      return { type: 'now', label: m ? m[1].trim() : t };
+    } else {
+      return { type: 'todo', label: t };
+    }
+  });
+
+  // Mark only first non-done as "now"
+  let foundNow = false;
+  const finalSteps = steps.map(s => {
+    if (s.type === 'now' && !foundNow) { foundNow = true; return s; }
+    if (s.type === 'now') return { ...s, type: 'todo' };
+    return s;
+  });
+
+  let html = '<div class="roadmap">';
+  finalSteps.forEach((s, i) => {
+    if (i > 0) html += '<span class="arrow">→</span>';
+    html += `<span class="step ${s.type}">${escapeHtml(s.label)}</span>`;
+  });
+  html += '</div>';
+
+  // Add high-level phases too
+  html += `<h2 class="section-title">Phasen-Übersicht</h2>
+    <div class="roadmap">
+      <span class="step done">Phase 1: Setup</span>
+      <span class="arrow">→</span>
+      <span class="step now">Phase 1.5: Stabilisierung</span>
+      <span class="arrow">→</span>
+      <span class="step todo">Phase 2: Memory + Skills</span>
+      <span class="arrow">→</span>
+      <span class="step todo">Phase 3: Voice + Vision</span>
+    </div>`;
+
+  document.getElementById('roadmapContent').innerHTML = html;
+}
+
+function renderGantt() {
+  // Build timeline from changelog dates
+  if (!DATA.changelog.length) {
+    document.getElementById('ganttContent').innerHTML = '<p style="color:var(--muted)">Keine Daten für Zeitstrahl</p>';
+    return;
+  }
+
+  // Get date range
+  const dates = DATA.changelog.map(c => c.date).filter(d => /^\d{4}-\d{2}-\d{2}/.test(d)).sort();
+  const minDate = new Date(dates[0]);
+  const maxDate = new Date(dates[dates.length - 1]);
+  // Extend max by 30 days to show future
+  const endDate = new Date(maxDate);
+  endDate.setDate(endDate.getDate() + 60);
+
+  const totalMs = endDate - minDate;
+  const todayMs = Date.now() - minDate;
+  const todayPct = Math.min(100, Math.max(0, (todayMs / totalMs) * 100));
+
+  // Group changelog by week → bars
+  const weekGroups = {};
+  DATA.changelog.forEach(c => {
+    const d = new Date(c.date);
+    if (isNaN(d)) return;
+    const weekKey = c.date.substring(0, 7); // YYYY-MM
+    if (!weekGroups[weekKey]) weekGroups[weekKey] = [];
+    weekGroups[weekKey].push(c);
+  });
+
+  // Build month markers
+  const months = [];
+  const cursor = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+  while (cursor <= endDate) {
+    months.push(new Date(cursor));
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  let html = '<div class="gantt-wrap">';
+  html += `<div style="display:flex; gap: 16px; margin-bottom: 16px; font-size: 12px; align-items: center; flex-wrap: wrap;">
+    <div style="display:flex;align-items:center;gap:6px"><div style="width:14px;height:14px;background:var(--green);border-radius:3px"></div>Erledigt</div>
+    <div style="display:flex;align-items:center;gap:6px"><div style="width:14px;height:14px;background:var(--orange);border-radius:3px"></div>In Arbeit</div>
+    <div style="display:flex;align-items:center;gap:6px"><div style="width:14px;height:14px;background:transparent;border:1px dashed var(--blue);border-radius:3px"></div>Geplant</div>
+    <div style="margin-left:auto;color:var(--muted)">${months.length} Monate · ${DATA.changelog.length} Events</div>
+  </div>`;
+
+  html += '<div class="gantt-header"><div class="gantt-label"><b>Phase / Task</b></div><div class="gantt-months">';
+  months.forEach(m => {
+    html += `<span>${m.toLocaleDateString('de-DE', { month: 'short', year: '2-digit' })}</span>`;
+  });
+  html += '</div></div>';
+
+  // Done tasks - extract date from changelog mentions
+  const doneTasksMap = {};
+  DATA.changelog.forEach(c => {
+    const phaseMatch = c.text.match(/Phase\s+(\d+\.\d+\.\d+\w?)/i);
+    if (phaseMatch) {
+      const id = phaseMatch[1];
+      if (!doneTasksMap[id]) doneTasksMap[id] = { dates: [], texts: [] };
+      doneTasksMap[id].dates.push(c.date);
+      doneTasksMap[id].texts.push(c.text.substring(0, 80));
+    }
+  });
+
+  // Render done tasks from status table
+  DATA.statusTable.forEach(task => {
+    const cleanId = task.id.replace(/[^\d.]/g, '');
+    const taskDates = doneTasksMap[cleanId]?.dates || [];
+
+    let barStart = 0, barWidth = 5;
+    let barClass = 'open';
+
+    if (task.status === 'done' && taskDates.length) {
+      const start = new Date(taskDates[taskDates.length - 1]); // earliest entry
+      const end = new Date(taskDates[0]); // latest
+      barStart = ((start - minDate) / totalMs) * 100;
+      barWidth = Math.max(2, ((end - start) / totalMs) * 100);
+      barClass = 'done';
+    } else if (task.status === 'progress' && taskDates.length) {
+      const start = new Date(taskDates[taskDates.length - 1]);
+      barStart = ((start - minDate) / totalMs) * 100;
+      barWidth = Math.max(3, ((Date.now() - start) / totalMs) * 100);
+      barClass = 'prog';
+    } else if (task.status === 'open') {
+      // Future placeholder: 30 days from "now"
+      barStart = todayPct;
+      barWidth = (30 * 24 * 60 * 60 * 1000 / totalMs) * 100;
+      barClass = 'open';
+    } else {
+      return;
+    }
+
+    barStart = Math.max(0, Math.min(95, barStart));
+    barWidth = Math.max(1.5, Math.min(100 - barStart, barWidth));
+
+    html += `<div class="gantt-row">
+      <div class="gantt-label">
+        <b>${escapeHtml(task.task.substring(0, 28))}${task.task.length > 28 ? '…' : ''}</b>
+        <span>${escapeHtml(task.id)}</span>
+      </div>
+      <div class="gantt-track">
+        <div class="gantt-bar ${barClass}" style="left:${barStart}%; width:${barWidth}%" title="${escapeHtml(task.task)}">
+          ${barWidth > 8 ? escapeHtml(task.id) : ''}
+        </div>
+      </div>
+    </div>`;
+  });
+
+  html += '</div>';
+  document.getElementById('ganttContent').innerHTML = html;
+}
+
+function renderPhase15() {
+  const counts = countStatuses(DATA.statusTable);
+  document.getElementById('phase15Sub').textContent = `${DATA.statusTable.length} Tasks · ${counts.done} erledigt · ${counts.progress} in Arbeit · ${counts.open} offen`;
+
+  const grouped = {
+    done: DATA.statusTable.filter(t => t.status === 'done'),
+    progress: DATA.statusTable.filter(t => t.status === 'progress'),
+    open: DATA.statusTable.filter(t => t.status === 'open')
+  };
+
+  let html = '';
+  if (grouped.progress.length) {
+    html += `<div class="panel">
+      <div class="panel-head"><div class="panel-title">🔶 In Arbeit (${grouped.progress.length})</div></div>
+      <div class="panel-body">${grouped.progress.map(renderTaskRow).join('')}</div>
+    </div>`;
+  }
+  if (grouped.open.length) {
+    html += `<div class="panel">
+      <div class="panel-head"><div class="panel-title">⬜ Offen (${grouped.open.length})</div></div>
+      <div class="panel-body">${grouped.open.map(renderTaskRow).join('')}</div>
+    </div>`;
+  }
+  if (grouped.done.length) {
+    html += `<div class="panel">
+      <div class="panel-head"><div class="panel-title">✅ Erledigt (${grouped.done.length})</div></div>
+      <div class="panel-body">${grouped.done.map(renderTaskRow).join('')}</div>
+    </div>`;
+  }
+  document.getElementById('phase15Content').innerHTML = html;
+}
+
+function renderPhase2() {
+  if (!DATA.phase2.length) {
+    document.getElementById('phase2Content').innerHTML = '<p style="color:var(--muted)">Keine Phase-2-Daten gefunden</p>';
+    return;
+  }
+  let html = '<div class="panel"><div class="panel-body">';
+  DATA.phase2.forEach(p => {
+    html += `<div class="task">
+      <div class="icon">⬜</div>
+      <div class="id">${escapeHtml(p.id)}</div>
+      <div class="body">
+        <div class="body-name"><b>${escapeHtml(p.feature)}</b></div>
+        <div class="body-next">${escapeHtml(p.desc)}</div>
+        ${p.depends && p.depends !== '—' ? `<div class="body-next" style="color:var(--blue)">Abhängig von: ${escapeHtml(p.depends)}</div>` : ''}
+      </div>
+    </div>`;
+  });
+  html += '</div></div>';
+  document.getElementById('phase2Content').innerHTML = html;
+}
+
+function renderPhase3() {
+  if (!DATA.phase3.length) {
+    document.getElementById('phase3Content').innerHTML = '<p style="color:var(--muted)">Keine Phase-3-Daten gefunden</p>';
+    return;
+  }
+  let html = '';
+  if (DATA.phase3[0]?.desc && !DATA.phase3[0].id) {
+    html += `<div class="info-box"><strong>Vision:</strong> ${escapeHtml(DATA.phase3[0].desc)}</div>`;
+  }
+  const items = DATA.phase3.filter(p => p.id);
+  if (items.length) {
+    html += '<div class="panel"><div class="panel-body">';
+    items.forEach(p => {
+      html += `<div class="task">
+        <div class="icon">⬜</div>
+        <div class="id">${escapeHtml(p.id)}</div>
+        <div class="body">
+          <div class="body-name"><b>${escapeHtml(p.feature)}</b></div>
+          <div class="body-next">${escapeHtml(p.desc)}</div>
+        </div>
+      </div>`;
+    });
+    html += '</div></div>';
+  }
+  document.getElementById('phase3Content').innerHTML = html;
+}
+
+function renderMcp() {
+  // Use status table to identify active MCPs
+  const activeFromText = (DATA.summary || '').match(/(\d+)\s*MCP/);
+  const activeCount = activeFromText ? parseInt(activeFromText[1]) : 0;
+  document.getElementById('mcpSub').textContent = `${activeCount || DATA.mcp.length} aktiv · weitere geplant`;
+
+  // Hard-coded core list inferred from status table
+  const knownActive = ['caldav', 'things3', 'notion', 'deutsche-bahn', 'weather', 'himes-tools'];
+  const planned = [
+    { name: 'home-assistant', desc: '1.5.33 — In Integration', state: 'pending' },
+    { name: 'tavily + exa', desc: '1.5.9 — Web-Suche, geplant', state: 'planned' },
+    { name: 'time + filesystem', desc: '1.5.23 — geplant', state: 'planned' },
+    { name: 'cognee', desc: 'Phase 2.1 — installiert, MCP-Anbindung offen', state: 'pending' },
+    { name: 'gmail', desc: 'Welle 2 — pausiert (Security-Review)', state: 'planned' },
+    { name: 'google maps', desc: 'Welle 2 — pausiert (Billing)', state: 'planned' }
+  ];
+
+  let html = '<h2 class="section-title">✅ Aktiv</h2><div class="mcp-grid">';
+  knownActive.forEach(name => {
+    html += `<div class="mcp active">
+      <div class="mcp-name">${escapeHtml(name)}</div>
+      <div class="mcp-desc">${getMcpDesc(name)}</div>
+      <span class="mcp-status">aktiv</span>
+    </div>`;
+  });
+  html += '</div>';
+
+  html += '<h2 class="section-title">🔶 In Integration / Geplant</h2><div class="mcp-grid">';
+  planned.forEach(m => {
+    html += `<div class="mcp ${m.state}">
+      <div class="mcp-name">${escapeHtml(m.name)}</div>
+      <div class="mcp-desc">${escapeHtml(m.desc)}</div>
+      <span class="mcp-status">${m.state === 'pending' ? 'in arbeit' : 'geplant'}</span>
+    </div>`;
+  });
+  html += '</div>';
+
+  document.getElementById('mcpContent').innerHTML = html;
+}
+
+function getMcpDesc(name) {
+  const descs = {
+    'caldav': 'Apple Kalender (iCloud)',
+    'things3': 'Aufgabenverwaltung',
+    'notion': 'Second Brain',
+    'deutsche-bahn': 'Bahn + VRR Nahverkehr',
+    'weather': 'Wetter aktuell + Vorhersage',
+    'himes-tools': 'Eigene Helfer (Zeit, Memory)'
+  };
+  return descs[name] || '—';
+}
+
+function renderAdr() {
+  document.getElementById('adrSub').textContent = `${DATA.adrs.length} Architektur-Entscheidungen dokumentiert`;
+  if (!DATA.adrs.length) {
+    document.getElementById('adrContent').innerHTML = '<p style="color:var(--muted)">Keine ADRs gefunden</p>';
+    return;
+  }
+  let html = '<div class="adr-list">';
+  // Sort newest first (highest number)
+  const sorted = [...DATA.adrs].sort((a, b) => parseInt(b.num) - parseInt(a.num));
+  sorted.forEach(adr => {
+    const statusClass = getAdrClass(adr.status);
+    html += `<div class="adr">
+      <div class="adr-num">ADR-${adr.num}</div>
+      <div class="adr-text">${escapeHtml(adr.decision.substring(0, 400))}${adr.decision.length > 400 ? '…' : ''}</div>
+      <div class="adr-status ${statusClass}">${escapeHtml(adr.status.substring(0, 25))}</div>
+    </div>`;
+  });
+  html += '</div>';
+  document.getElementById('adrContent').innerHTML = html;
+}
+
+function getAdrClass(status) {
+  const s = status.toLowerCase();
+  if (s.includes('aktiv')) return 'aktiv';
+  if (s.includes('geplant')) return 'geplant';
+  if (s.includes('akzeptiert')) return 'akzeptiert';
+  if (s.includes('ersetzt')) return 'ersetzt';
+  if (s.includes('diskussion')) return 'diskussion';
+  return 'aktiv';
+}
+
+function renderChangelog() {
+  document.getElementById('changelogSub').textContent = `${DATA.changelog.length} Einträge`;
+  if (!DATA.changelog.length) {
+    document.getElementById('changelogContent').innerHTML = '<p style="color:var(--muted)">Kein Changelog gefunden</p>';
+    return;
+  }
+  let html = '<div class="changelog">';
+  DATA.changelog.forEach(c => {
+    html += `<div class="changelog-entry">
+      <div class="changelog-date">${escapeHtml(c.date)}</div>
+      <div class="changelog-ver">v${escapeHtml(c.version)}</div>
+      <div class="changelog-text">${escapeHtml(c.text.substring(0, 500))}${c.text.length > 500 ? '…' : ''}</div>
+    </div>`;
+  });
+  html += '</div>';
+  document.getElementById('changelogContent').innerHTML = html;
+}
+
+function renderRaw() {
+  document.getElementById('rawContent').textContent = RAW_TEXT;
+}
+
+// ============================================================
+// SEARCH
+// ============================================================
+function applySearch(query) {
+  const q = query.toLowerCase().trim();
+  if (!q) {
+    document.querySelectorAll('.task, .adr, .changelog-entry, .mcp').forEach(el => el.style.display = '');
+    return;
+  }
+  document.querySelectorAll('.task, .adr, .changelog-entry, .mcp').forEach(el => {
+    el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+// ============================================================
+// UTILS
+// ============================================================
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/`([^`]+)`/g, '<code style="background:var(--panel-3);padding:1px 4px;border-radius:3px;font-size:11px">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+}
+
+// ============================================================
+// EVENT WIRING
+// ============================================================
+async function loadData() {
+  const text = await fetchFromGitHub();
+  if (text) {
+    RAW_TEXT = text;
+    DATA = parseMarkdown(text);
+    renderAll();
+  }
+}
+
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+    item.classList.add('active');
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + item.dataset.page).classList.add('active');
+  });
+});
+
+document.getElementById('refreshBtn').addEventListener('click', loadData);
+
+document.getElementById('settingsBtn').addEventListener('click', () => {
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+  document.querySelector('[data-page="settings"]').classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-settings').classList.add('active');
+});
+
+document.getElementById('searchInput').addEventListener('input', e => applySearch(e.target.value));
+
+document.getElementById('saveSettings').addEventListener('click', () => {
+  CONFIG = {
+    ghUser: document.getElementById('ghUser').value.trim(),
+    ghRepo: document.getElementById('ghRepo').value.trim(),
+    ghBranch: document.getElementById('ghBranch').value.trim() || 'main',
+    ghPath: document.getElementById('ghPath').value.trim() || 'docs/MASTER-REFERENCE.md',
+    autoRefresh: parseInt(document.getElementById('autoRefresh').value) || 0
+  };
+  saveConfigToMemory(CONFIG);
+  setupAutoRefresh();
+  loadData();
+});
+
+document.getElementById('testFetch').addEventListener('click', async () => {
+  const tmpCfg = {
+    ghUser: document.getElementById('ghUser').value.trim(),
+    ghRepo: document.getElementById('ghRepo').value.trim(),
+    ghBranch: document.getElementById('ghBranch').value.trim() || 'main',
+    ghPath: document.getElementById('ghPath').value.trim() || 'docs/MASTER-REFERENCE.md',
+  };
+  const url = `https://raw.githubusercontent.com/${tmpCfg.ghUser}/${tmpCfg.ghRepo}/${tmpCfg.ghBranch}/${tmpCfg.ghPath}`;
+  setStatus('loading', `Test: ${url}`);
+  try {
+    const r = await fetch(url + '?t=' + Date.now());
+    if (r.ok) {
+      const t = await r.text();
+      setStatus('live', `OK · ${t.length} Bytes geladen`);
+      alert(`✅ Erfolgreich!\n\nURL: ${url}\nGröße: ${t.length} Bytes\n\nKlicke "Speichern + Laden" um zu übernehmen.`);
+    } else {
+      setStatus('error', `HTTP ${r.status}`);
+      alert(`❌ Fehler ${r.status}\n\n${url}\n\nPrüfe User/Repo/Branch/Pfad.`);
+    }
+  } catch (e) {
+    setStatus('error', e.message);
+    alert(`❌ Netzwerk-Fehler: ${e.message}`);
+  }
+});
+
+// Drop zone
+const dz = document.getElementById('dropZone');
+const fi = document.getElementById('fileInput');
+dz.addEventListener('click', () => fi.click());
+fi.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+dz.addEventListener('drop', e => {
+  e.preventDefault();
+  dz.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+function loadFile(f) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    RAW_TEXT = e.target.result;
+    DATA = parseMarkdown(RAW_TEXT);
+    setStatus('live', `Geladen aus Datei: ${f.name}`);
+    renderAll();
+    // Switch to overview
+    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+    document.querySelector('[data-page="overview"]').classList.add('active');
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-overview').classList.add('active');
+  };
+  reader.readAsText(f);
+}
+
+// Populate settings
+function fillSettings() {
+  document.getElementById('ghUser').value = CONFIG.ghUser || '';
+  document.getElementById('ghRepo').value = CONFIG.ghRepo || '';
+  document.getElementById('ghBranch').value = CONFIG.ghBranch || 'main';
+  document.getElementById('ghPath').value = CONFIG.ghPath || 'docs/MASTER-REFERENCE.md';
+  document.getElementById('autoRefresh').value = CONFIG.autoRefresh ?? 5;
+}
+
+function setupAutoRefresh() {
+  if (REFRESH_TIMER) clearInterval(REFRESH_TIMER);
+  if (CONFIG.autoRefresh > 0) {
+    REFRESH_TIMER = setInterval(loadData, CONFIG.autoRefresh * 60 * 1000);
+  }
+}
+
+// ============================================================
+// INIT
+// ============================================================
+fillSettings();
+if (CONFIG.ghUser && CONFIG.ghRepo) {
+  loadData();
+  setupAutoRefresh();
+} else {
+  // No config — show settings
+  setStatus('error', 'Bitte Repo konfigurieren');
+  document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+  document.querySelector('[data-page="settings"]').classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-settings').classList.add('active');
+}
+</script>
+</body>
+</html>
