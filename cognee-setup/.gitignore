@@ -1,0 +1,9 @@
+# Geheime Konfigurations-Werte nicht committen
+.env
+
+# Cognee-Daten und venv (nur auf Server)
+.venv/
+.cognee_system/
+.cognee_data/
+*.db
+*.lance/
