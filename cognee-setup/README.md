@@ -80,12 +80,38 @@ Siehe `.env.example` für alle Variablen. Wichtigste:
 
 ## Datenbanken-Speicherort
 
-Aktuell liegen die Datenbanken im venv unter:
+Cognee speichert SQLite + LanceDB + Kuzu standardmässig **innerhalb des venv** unter `<site-packages>/cognee/.cognee_system/databases/`. Das ist suboptimal — bei venv-Recreate (uv pip reinstall, Cognee-Update) gehen die Daten verloren.
+
+Lösung: `SYSTEM_ROOT_DIRECTORY` und `DATA_ROOT_DIRECTORY` in `.env` zeigen nach `$HOME/cognee/data/...`. Cognee leitet alle drei Provider-Pfade aus `SYSTEM_ROOT_DIRECTORY` ab (siehe `cognee/infrastructure/databases/{relational,vector,graph}/config.py`).
+
+Default-Pfade nach Migration:
 ```
-$HOME/cognee/.venv/lib/python3.12/site-packages/cognee/.cognee_system/databases/
+$HOME/cognee/data/.cognee_system/databases/cognee_db          # SQLite
+$HOME/cognee/data/.cognee_system/databases/cognee.lancedb     # LanceDB
+$HOME/cognee/data/.cognee_system/databases/cognee_graph_kuzu  # Kuzu
+$HOME/cognee/data/.data_storage/                              # ingestierte Rohdaten
 ```
 
-Das ist suboptimal — bei venv-Recreate gehen Daten verloren. In Phase 2.1 Schritt 3 wird dies via Umgebungsvariable nach `$HOME/cognee/data/` verschoben.
+### Migration für bestehende Installationen
+
+Wenn Cognee schon läuft und Daten im venv-Pfad liegen, einmalig das Migrations-Skript ausführen:
+
+```
+cd ~/cognee
+bash /pfad/zum/repo/cognee-setup/migrate-data-dir.sh
+```
+
+Das Skript ist idempotent:
+- Erst-Setup ohne Daten: legt nur die neuen Pfade an
+- Volle alte DBs: Backup nach `$HOME/cognee/backup/<timestamp>/`, dann Move + Verify
+- Schon migriert (neue Pfade gefüllt, alte leer): meldet "nichts zu tun" und endet
+- Doppelter Zustand (beide Seiten gefüllt): bricht ab, kein Auto-Merge
+
+Anschliessend `.env` prüfen, dass `SYSTEM_ROOT_DIRECTORY` und `DATA_ROOT_DIRECTORY` gesetzt sind, dann Cognee neu starten und Smoke-Test laufen lassen.
+
+### Hinweis zur zukünftigen Migration von `data_root_directory`
+
+Die SQLite-Tabelle `Data` enthält Spalten `raw_data_location` und `original_data_location` mit absoluten Pfaden zu ingestierten Dateien. Wenn später nur `DATA_ROOT_DIRECTORY` umgezogen wird (nicht `SYSTEM_ROOT_DIRECTORY`), reicht ein `mv` nicht — diese Pfade in der Metadata müssen ebenfalls umgeschrieben werden. Siehe ADR-042.
 
 ## Verzeichnis-Struktur (auf Server nach Installation)
 
@@ -95,7 +121,12 @@ $HOME/cognee/
 ├── .env                      # Konfiguration (NICHT in Git)
 ├── .env.example              # Template (in Git)
 ├── install.sh                # Setup-Skript
-└── smoke_test.py             # Validierungs-Test
+├── migrate-data-dir.sh       # Einmalige Migration aus venv-Pfad
+├── smoke_test.py             # Validierungs-Test
+├── data/
+│   ├── .cognee_system/       # SQLite + LanceDB + Kuzu
+│   └── .data_storage/        # Ingestierte Rohdaten + Loader-Cache
+└── backup/                   # Migrations-Backups (nach Bedarf)
 ```
 
 ## Versionen
