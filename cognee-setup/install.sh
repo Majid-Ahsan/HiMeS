@@ -26,6 +26,12 @@ fi
 mkdir -p "$COGNEE_DIR"
 cd "$COGNEE_DIR"
 
+# Stabile Daten-Verzeichnisse ausserhalb des venv anlegen (idempotent).
+# Cognee liest SYSTEM_ROOT_DIRECTORY und DATA_ROOT_DIRECTORY aus .env
+# und legt darunter selber an, was es braucht. Wir erstellen nur die
+# leeren Wurzeln, damit fehlerhafte Permissions frueh sichtbar werden.
+mkdir -p "$COGNEE_DIR/data/.cognee_system" "$COGNEE_DIR/data/.data_storage"
+
 # venv anlegen wenn nicht vorhanden
 if [ ! -d ".venv" ]; then
     echo "Erstelle venv mit Python 3.12..."
@@ -48,7 +54,8 @@ if [ ! -f ".env" ]; then
     echo ".env-Datei fehlt. Bitte:"
     echo "1. Kopiere .env.example zu .env"
     echo "2. Trage deinen Anthropic API-Key ein (klassisch sk-ant-api03-)"
-    echo "3. Setze chmod 600 .env"
+    echo "3. Pruefe SYSTEM_ROOT_DIRECTORY / DATA_ROOT_DIRECTORY (Default: $COGNEE_DIR/data/...)"
+    echo "4. Setze chmod 600 .env"
     echo ""
 fi
 
