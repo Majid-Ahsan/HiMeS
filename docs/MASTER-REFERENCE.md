@@ -906,20 +906,18 @@ unter cognee-setup/ (siehe Schritt 2). Erste echte Code-Schritte nach
 abgeschlossenem Schema-Design. Drei wichtige Erkenntnisse als ADRs 
 dokumentiert (039-041).
 
-#### Phase 2.1 Ausführung — Vorbereitung
+##### Offene Konzept-Arbeit
 
-Schema-Design weitgehend abgeschlossen (3 von 4 Memory-Typen dokumentiert, 
-Vokabular fertig, Strategie geklärt). Nächste Schritte vor Cognee-
-Installation:
+Folgende Themen sind noch zu designen bevor die Implementierung weitergeht:
 
 - Memory-Typ 4 (Conversation) designen und dokumentieren
-- Drei-Schichten-Gedächtnis-Architektur designen (siehe ADR-037)
+- Drei-Schichten-Gedächtnis-Architektur ausarbeiten (siehe ADR-037)
 - Tool-Routing-Regeln definieren (wann Calendar, wann Notion, wann Memory)
 - Ableitungs-Regeln für Anchor-Graph-Traversal
 - Jarvis-Prompt-Regeln für selektive Antworten (Regel 9 Umsetzung)
 - Erste Anchor-Datei majid-ahsan.md erstellen
 
-Danach: Cognee-Installation, Ingest-Pipeline-Code, End-to-End-Tests.
+Diese Punkte können parallel zu den Implementierungs-Schritten 3-8 angegangen werden.
 
 #### Phase 2.1 Ausführung
 
