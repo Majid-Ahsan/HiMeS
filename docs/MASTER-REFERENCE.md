@@ -463,6 +463,35 @@ Nach Deploy hat Majid eine Reihe realer Anfragen gestellt. Befunde:
 
 ---
 
+## 1f. UPDATE 2026-04-23 — Strategische Neuausrichtung — HiMeS-Scope-Klärung
+
+Während der Memory-Schema-Design-Sessions wurde grundlegend geklärt 
+welche Rolle HiMeS in der Tool-Landschaft spielt:
+
+HiMeS ist kein universelles Gedächtnis sondern spezialisiert auf 
+Daten die in keinem anderen Tool existieren:
+- Persönlicher Gedanken-Strom (Daily-Log)
+- Persönliche Sicht auf Menschen (Entity-Person mit Anchor-System)
+- Erschlossene Charaktermuster (Insights)
+- Gesprächs-Gedächtnis mit Jarvis selbst (Conversation)
+
+Was nicht in HiMeS gespeichert wird:
+- Termine: bleiben in Calendar (CalDAV)
+- Strukturierte Daten wie Medikamente, Projekte: bleiben in Notion
+- Tasks: bleiben in Things3
+- Research-Notizen: bleiben in Notion oder externe Bibliothek
+
+Jarvis als Orchestrator kennt alle Quellen und routet Anfragen dorthin 
+wo die Daten sind. HiMeS Memory ist eine Quelle unter mehreren, nicht 
+die einzige.
+
+Konsequenz: Memory-Typen reduziert von 8 auf 4 (siehe ADR-035). 
+Initial-Daten-Strategie passiv (siehe ADR-036). Drei-Schichten-
+Gedächtnis-Konzept mit Dreaming-Phase eingebracht, noch in Diskussion 
+(siehe ADR-037).
+
+---
+
 ## 2. ARCHITEKTUR
 
 ```
@@ -825,6 +854,29 @@ Insights-Datei-Schema (Memory-Typ 2a) definiert. Anchor-System
 mit Default/Query-Anchor-Unterscheidung. Dual-Datei-Prinzip 
 (entities/ + insights/) für Fakten vs Charakter-Muster.
 
+Update 2026-04-23 (Vokabular und Strategie): Beziehungs-Vokabular 
+vollständig definiert (44 Werte in 9 Gruppen für rel_to_anchor, 
+4 Werte für rel_via). Strategische Neuausrichtung: Memory-Typen 
+reduziert von 8 auf 4 (Daily-Log, Entity-Person, Insights, Conversation). 
+HiMeS speichert nur was nirgendwo anders existiert — Calendar, Notion, 
+Things3 bleiben Quelle für ihre jeweiligen Daten. Initial-Daten-
+Strategie: passive Erfassung über Daily-Logs.
+
+#### Phase 2.1 Ausführung — Vorbereitung
+
+Schema-Design weitgehend abgeschlossen (3 von 4 Memory-Typen dokumentiert, 
+Vokabular fertig, Strategie geklärt). Nächste Schritte vor Cognee-
+Installation:
+
+- Memory-Typ 4 (Conversation) designen und dokumentieren
+- Drei-Schichten-Gedächtnis-Architektur designen (siehe ADR-037)
+- Tool-Routing-Regeln definieren (wann Calendar, wann Notion, wann Memory)
+- Ableitungs-Regeln für Anchor-Graph-Traversal
+- Jarvis-Prompt-Regeln für selektive Antworten (Regel 9 Umsetzung)
+- Erste Anchor-Datei majid-ahsan.md erstellen
+
+Danach: Cognee-Installation, Ingest-Pipeline-Code, End-to-End-Tests.
+
 ### Phase 2.13 — Use-Case: WebUntis-Integration (Tahas Stundenplan)
 
 Kein fertiger MCP verfügbar (Stand 2026-04-16). Drei Optionen für zukünftige Implementierung:
@@ -1027,6 +1079,9 @@ Referenz: GitHub Issue #34 des claude-agent-sdk-Repos. Relevant für Phase 1.5.2
 | 032 | ha-mcp (homeassistant-ai) als Home Assistant MCP-Server statt offizieller HA MCP-Integration. Entscheidung basiert auf: (a) HA OS Add-on verfügbar (simple Installation), (b) 86 Tools über 34 Module (umfassend), (c) aktive Entwicklung, (d) HTTP-Transport kompatibel mit mcp-proxy für Remote-Zugriff. Alternativen geprüft: voska/hass-mcp (weniger Tools), tevonsb/homeassistant-mcp (abandoned), mtebusi/HA_MCP (kleiner Scope). Phase 1.5.33. | Aktiv |
 | 033 | Search MCP: Tavily + Exa statt Brave Search. Brave Search hat Free Tier im Februar 2026 eingestellt. Tavily und Exa bieten beide kostenlose Tiers ohne Credit-Card-Requirement. Redundanz durch zwei Provider reduziert Ausfall-Risiko, erhöht Query-Qualität bei schwierigen Suchen. Aktivierung: Phase 1.5.9. | Geplant |
 | 034 | Anchor-basiertes Memory-Schema (Phase 2.1 Vorarbeit, 2026-04-23): Personen-Beziehungen werden relativ zum Primary User (Majid) im Frontmatter-Feld `rel_to_anchor` definiert statt redundant in jeder Entity-Datei. Multi-User über temporären Anchor-Wechsel zur Query-Zeit. Abgeleitete Beziehungen via Graph-Traversal (`anchor.son.mother`, `anchor.spouse.mother`). Skalierbar für große Familien, Multi-User-ready ohne späteres Refactoring. Volle Spezifikation + 10 Grundregeln in docs/memory-schema.md. | Akzeptiert |
+| 035 | Memory-Typen reduziert auf 4 (Phase 2.1 Vorarbeit, 2026-04-23): HiMeS speichert nur Daily-Log, Entity-Person, Insights, Conversation — also nur das was in keinem anderen Tool existiert (Gedanken-Strom, persönliche Sicht auf Menschen, Charaktermuster, Jarvis-Gespräche). Ort, Medikament, Konzept, Meeting, Research werden in Calendar/Notion/etc. gespeichert, nicht in HiMeS. Vermeidet Doppel-Speicherung; Jarvis als Orchestrator routet Anfragen zur richtigen Quelle. | Akzeptiert |
+| 036 | Initial-Daten-Strategie passiv (Phase 2.1 Vorarbeit, 2026-04-23): Familien-Daten werden nicht initial via Setup-Skript eingegeben. Jarvis erstellt Entity-Dateien organisch beim Erkennen in Daily-Logs und fragt bei Bedarf nach. Nur die Anchor-Datei `majid-ahsan.md` wird initial erstellt. Vermeidet Cold-Start-Datenpflege-Aufwand und liefert nur Daten die tatsächlich gebraucht werden. | Akzeptiert |
+| 037 | Drei-Schichten-Gedächtnis mit Dreaming-Phase (2026-04-23): Konzept eingebracht von Majid: Kurzzeit/Mittelzeit/Langzeit-Gedächtnis mit nächtlicher Sortierung um 3:30 Uhr durch Jarvis. Architektur betrifft alle Memory-Typen (Memory-Typ 4 Conversation eng verbunden). Verhältnis zu ADR-015 (3-Layer Memory: MEMORY.md + Cognee Graph + Rules) noch zu klären. Volle Spezifikation steht aus. | In Diskussion |
 
 ---
 
