@@ -971,9 +971,21 @@ Verifikation:
 
 Erkenntnis aus der Vorklärung als ADR-042 dokumentiert: bei zukünftiger Migration von `DATA_ROOT_DIRECTORY` (nicht aktuell, weil DBs vor Move leer waren) müssten zusätzlich die absoluten Pfade in der `Data`-Tabelle (`raw_data_location`, `original_data_location`) umgeschrieben werden.
 
+##### Schritt 4 — Multi-User-Access-Control Default akzeptiert (2026-04-25) ✓
+
+Cognee bietet `ENABLE_BACKEND_ACCESS_CONTROL` als Schalter für die automatische User-Trennung. Default ist AN. Entscheidung: bleibt AN.
+
+Begründung:
+- Aktuell Single-User (nur Majid). Default ist sicher und bringt für einen User keinen relevanten Overhead.
+- Default ist bereits multi-user-ready für späteren Ausbau (Telegram-Multi-User mit Neda/Taha/Hossein). Kein späteres Refactoring nötig.
+- Konsistent mit ADR-035 (Anchor-System multi-user-vorbereitet via Anchor-Wechsel zur Query-Zeit).
+
+Blockiert nichts: bei zukünftigem Bedarf kann der Schalter ohne Datenverlust revidiert werden (Konfigurations-Änderung in `.env`, kein Schema-Bruch).
+
+Volle Begründung als ADR-043 dokumentiert.
+
 ##### Verbleibende Schritte (offen)
 
-- Schritt 4: Multi-User-Access-Control entscheiden für HiMeS-Integration
 - Schritt 5: Voice-Memo-zu-Markdown-Pipeline bauen (Whisper-Output → Daily-Log-Format)
 - Schritt 6: Markdown-Pipeline an Cognee anbinden (Daily-Log → Knowledge Graph)
 - Schritt 7: Cognee als MCP-Tool für Jarvis registrieren (Memory-Queries aus Chat)
@@ -981,7 +993,6 @@ Erkenntnis aus der Vorklärung als ADR-042 dokumentiert: bei zukünftiger Migrat
 
 ##### Bekannte technische Schuld
 
-- Multi-User-Access-Control standardmäßig aktiv. Entscheidung in Schritt 4.
 - ANTHROPIC_API_KEY auf VPS doppelt gesetzt (Debug-Artefakt). Optional aufräumen wenn gewünscht.
 
 ### Phase 2.13 — Use-Case: WebUntis-Integration (Tahas Stundenplan)
@@ -1200,6 +1211,7 @@ Referenz: GitHub Issue #34 des claude-agent-sdk-Repos. Relevant für Phase 1.5.2
 | 040 | Cognee 1.0.3 Anthropic-Adapter Bug-Workaround (2026-04-25): Cognee 1.0.3 reicht `max_tokens` nicht an Anthropic-API durch. Resultat: 128s Tenacity-Retry-Loop ohne klaren Fehler, der wie Timeout aussieht. Workaround: `LLM_ARGS={"max_tokens":4096}` in .env. Bei zukünftigen Cognee-Updates prüfen ob Bug gefixt und Workaround entfernen. | Akzeptiert (Workaround) |
 | 041 | OAuth-Token nicht für Cognee verwendbar (2026-04-25): Anthropic OAuth-Tokens (`sk-ant-oat01-`) funktionieren nur für simple Messages, nicht für Tool-Use/Function-Calling. Cognee braucht klassischen API-Key (`sk-ant-api03-`). Konsequenz: HiMeS und Cognee teilen denselben klassischen API-Key. Bei zukünftiger Multi-User-Erweiterung über Telegram möglicherweise pro-User-Keys nötig. | Akzeptiert (Erkenntnis) |
 | 042 | Cognee speichert absolute Pfade in Data-Metadata (2026-04-25): Die SQLite-Tabelle `Data` (cognee/modules/data/models/Data.py) enthält die Spalten `raw_data_location` und `original_data_location` mit absoluten Pfaden zu ingestierten Dateien. Diese zeigen typischerweise unter `DATA_ROOT_DIRECTORY`. Konsequenz: bei zukünftiger Migration von `DATA_ROOT_DIRECTORY` (im Gegensatz zu `SYSTEM_ROOT_DIRECTORY`, das nur DB-Container-Pfade beeinflusst) reicht ein `mv` der Daten-Dateien nicht — die Pfade in der SQLite-Metadata müssen ebenfalls umgeschrieben werden, sonst zeigen `raw_data_location`/`original_data_location` ins Leere. Aktuell (Phase 2.1 Schritt 3) irrelevant, weil DBs leer sind und Erstbefuellung nach Move passiert. Erkenntnis aus Phase-A-Aufklärung der Daten-Dir-Migration. | Akzeptiert (Erkenntnis) |
+| 043 | Cognee Multi-User-Access-Control Default akzeptiert (Phase 2.1 Schritt 4, 2026-04-25): `ENABLE_BACKEND_ACCESS_CONTROL` bleibt AN (Cognee-Default). Cognee verwaltet User-Trennung damit automatisch. Aktuell Single-User (nur Majid), aber Default ist bereits multi-user-ready für späteren Ausbau (Telegram-Multi-User mit Neda/Taha/Hossein). Konsistent mit ADR-035 (Anchor-System multi-user-vorbereitet). Blockiert nichts: Schalter kann bei zukünftigem Bedarf ohne Datenverlust revidiert werden. | Akzeptiert |
 
 ---
 
