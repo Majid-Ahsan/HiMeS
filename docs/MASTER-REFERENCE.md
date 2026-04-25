@@ -899,6 +899,13 @@ HiMeS speichert nur was nirgendwo anders existiert — Calendar, Notion,
 Things3 bleiben Quelle für ihre jeweiligen Daten. Initial-Daten-
 Strategie: passive Erfassung über Daily-Logs.
 
+Update 2026-04-25 (Cognee installiert und ins Repo eingefangen): 
+Cognee als eigenständiger Service auf VPS installiert (siehe Phase 
+2.1 Ausführung Schritt 1). Setup-Skripte und Doku ins Repo eingefangen 
+unter cognee-setup/ (siehe Schritt 2). Erste echte Code-Schritte nach 
+abgeschlossenem Schema-Design. Drei wichtige Erkenntnisse als ADRs 
+dokumentiert (039-041).
+
 #### Phase 2.1 Ausführung — Vorbereitung
 
 Schema-Design weitgehend abgeschlossen (3 von 4 Memory-Typen dokumentiert, 
@@ -913,6 +920,56 @@ Installation:
 - Erste Anchor-Datei majid-ahsan.md erstellen
 
 Danach: Cognee-Installation, Ingest-Pipeline-Code, End-to-End-Tests.
+
+#### Phase 2.1 Ausführung
+
+Nach abgeschlossenem Schema-Design startet die Implementierung. Cognee wird als Memory-Backend für HiMeS aufgesetzt.
+
+##### Schritt 1 — Cognee installiert (2026-04-25) ✓
+
+Cognee als eigenständiger Service auf VPS installiert.
+
+Setup-Details:
+- Pfad: /home/ali/cognee/ (separates venv, parallel zu HiMeS)
+- Cognee Version: 1.0.3 via uv pip install
+- LLM-Provider: Anthropic Claude (claude-haiku-4-5-20251001), nutzt bestehenden API-Key
+- Embedding-Provider: Fastembed lokal (sentence-transformers/all-MiniLM-L6-v2)
+- Datenbanken: SQLite + LanceDB + Kuzu (file-based, default)
+
+Smoke-Test: erfolgreich. Cognee hat aus 4-Satz-Familientext einen Knowledge Graph mit 17 Knoten und 28 Kanten gebaut. Frage Wer ist Reza wurde korrekt beantwortet inklusive Onkel-Beziehung, Wohnort Teheran, Beruf Arzt, Diabetes-Medikation seit 2019.
+
+Drei nicht-triviale Probleme bei der Installation gelöst:
+- OAuth-Tokens funktionieren nicht für Tool-Use → klassischer API-Key nötig (ADR-041)
+- Cognee 1.0.3 reicht max_tokens nicht durch → LLM_ARGS-Workaround nötig (ADR-040)
+- Cognee braucht nur LLM_API_KEY, nicht ANTHROPIC_API_KEY (transitive Dependencies haben Fallback)
+
+##### Schritt 2 — Cognee-Setup ins Repo eingefangen (2026-04-25) ✓
+
+Setup-Skripte und Dokumentation aus dem VPS-only-Zustand ins Repo gebracht (gemäß Stage-2-Workflow ADR-038).
+
+Neue Dateien unter cognee-setup/:
+- install.sh: idempotentes Server-Installationsskript
+- .env.example: Konfigurations-Template mit erklärenden Kommentaren
+- smoke_test.py: Server-side Validierungs-Test
+- README.md: Setup-Anleitung mit dokumentierten Bug-Workarounds und ANTHROPIC_API_KEY-Klarstellung
+- .gitignore: schützt .env und Runtime-Daten
+
+Validierung gegen VPS-Originale durchgeführt: einzige bewusste Abweichung ist ANTHROPIC_API_KEY (Legacy-Doppelung auf VPS aus Bug-Debugging, im Repo als Optional dokumentiert). Reproduzierbarkeit hergestellt: bei VPS-Verlust kann Cognee aus dem Repo neu aufgesetzt werden.
+
+##### Verbleibende Schritte (offen)
+
+- Schritt 3: Datenbanken aus venv-Pfad nach /home/ali/cognee/data/ verschieben (technische Schuld aus Schritt 1)
+- Schritt 4: Multi-User-Access-Control entscheiden für HiMeS-Integration
+- Schritt 5: Voice-Memo-zu-Markdown-Pipeline bauen (Whisper-Output → Daily-Log-Format)
+- Schritt 6: Markdown-Pipeline an Cognee anbinden (Daily-Log → Knowledge Graph)
+- Schritt 7: Cognee als MCP-Tool für Jarvis registrieren (Memory-Queries aus Chat)
+- Schritt 8: End-to-End-Test (Voice-Memo abends → morgens Frage stellen → korrekte Antwort)
+
+##### Bekannte technische Schuld
+
+- Cognee-Datenbanken liegen aktuell im venv-Verzeichnis (nicht ideal — bei venv-Recreate Datenverlust). Schritt 3 löst das.
+- Multi-User-Access-Control standardmäßig aktiv. Entscheidung in Schritt 4.
+- ANTHROPIC_API_KEY auf VPS doppelt gesetzt (Debug-Artefakt). Optional aufräumen wenn gewünscht.
 
 ### Phase 2.13 — Use-Case: WebUntis-Integration (Tahas Stundenplan)
 
@@ -1126,6 +1183,9 @@ Referenz: GitHub Issue #34 des claude-agent-sdk-Repos. Relevant für Phase 1.5.2
 | 036 | Initial-Daten-Strategie passiv (Phase 2.1 Vorarbeit, 2026-04-23): Familien-Daten werden nicht initial via Setup-Skript eingegeben. Jarvis erstellt Entity-Dateien organisch beim Erkennen in Daily-Logs und fragt bei Bedarf nach. Nur die Anchor-Datei `majid-ahsan.md` wird initial erstellt. Vermeidet Cold-Start-Datenpflege-Aufwand und liefert nur Daten die tatsächlich gebraucht werden. | Akzeptiert |
 | 037 | Drei-Schichten-Gedächtnis mit Dreaming-Phase (2026-04-23): Konzept eingebracht von Majid: Kurzzeit/Mittelzeit/Langzeit-Gedächtnis mit nächtlicher Sortierung um 3:30 Uhr durch Jarvis. Architektur betrifft alle Memory-Typen (Memory-Typ 4 Conversation eng verbunden). Verhältnis zu ADR-015 (3-Layer Memory: MEMORY.md + Cognee Graph + Rules) noch zu klären. Volle Spezifikation steht aus. | In Diskussion |
 | 038 | Stage-2-Feature-Branch-Workflow als Standard (2026-04-25): Mac entwickelt, GitHub ist Quelle der Wahrheit, VPS pullt. Direkte VPS-Edits verboten (außer Notfall-Hotfix). Feature-Branches für alle nicht-trivialen Änderungen, `--no-ff` Merges. Löst den früheren VPS-First-Workflow ab (siehe Phase 1.5.21 Doku, jetzt historisiert). Volle Spezifikation in Sektion 2b. | Akzeptiert |
+| 039 | Cognee-Setup mit Anthropic + Fastembed (2026-04-25): Cognee 1.0.3 als separater Service unter /home/ali/cognee/ (eigenes venv parallel zu HiMeS). LLM-Provider Anthropic Claude (Modell claude-haiku-4-5-20251001, kostengünstig für Knowledge-Graph-Extraktion), Embedding-Provider Fastembed lokal (sentence-transformers/all-MiniLM-L6-v2, keine externe API-Kosten). Datenbanken SQLite + LanceDB + Kuzu file-based (default, kein zusätzlicher DB-Server). Setup-Skripte im Repo unter cognee-setup/ für Reproduzierbarkeit. | Akzeptiert |
+| 040 | Cognee 1.0.3 Anthropic-Adapter Bug-Workaround (2026-04-25): Cognee 1.0.3 reicht `max_tokens` nicht an Anthropic-API durch. Resultat: 128s Tenacity-Retry-Loop ohne klaren Fehler, der wie Timeout aussieht. Workaround: `LLM_ARGS={"max_tokens":4096}` in .env. Bei zukünftigen Cognee-Updates prüfen ob Bug gefixt und Workaround entfernen. | Akzeptiert (Workaround) |
+| 041 | OAuth-Token nicht für Cognee verwendbar (2026-04-25): Anthropic OAuth-Tokens (`sk-ant-oat01-`) funktionieren nur für simple Messages, nicht für Tool-Use/Function-Calling. Cognee braucht klassischen API-Key (`sk-ant-api03-`). Konsequenz: HiMeS und Cognee teilen denselben klassischen API-Key. Bei zukünftiger Multi-User-Erweiterung über Telegram möglicherweise pro-User-Keys nötig. | Akzeptiert (Erkenntnis) |
 
 ---
 
