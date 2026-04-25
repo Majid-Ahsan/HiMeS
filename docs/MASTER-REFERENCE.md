@@ -954,9 +954,25 @@ Neue Dateien unter cognee-setup/:
 
 Validierung gegen VPS-Originale durchgeführt: einzige bewusste Abweichung ist ANTHROPIC_API_KEY (Legacy-Doppelung auf VPS aus Bug-Debugging, im Repo als Optional dokumentiert). Reproduzierbarkeit hergestellt: bei VPS-Verlust kann Cognee aus dem Repo neu aufgesetzt werden.
 
+##### Schritt 3 — DBs aus venv nach /home/ali/cognee/data/ verschoben (2026-04-25) ✓
+
+Cognee-Datenbanken aus dem venv-Verzeichnis in einen persistenten Pfad ausserhalb des venvs verschoben — damit ein venv-Recreate keinen Datenverlust mehr verursacht.
+
+Pfad-Wechsel:
+- Vorher: DBs unter `.venv/...` innerhalb von `/home/ali/cognee/`
+- Nachher: `/home/ali/cognee/data/.cognee_system/databases/`
+- `.env` um `SYSTEM_ROOT_DIRECTORY` und `DATA_ROOT_DIRECTORY` ergänzt, damit Cognee die neuen Pfade nutzt
+
+Backup vor Migration angelegt unter `/home/ali/cognee/backup/20260425-093128/` (Migrations-Skript, idempotent).
+
+Verifikation:
+- Smoke-Test grün: 17 Knoten / 29 Kanten, Frage „Wer ist Reza?" korrekt beantwortet
+- Cognee-Logs bestätigen `Database storage: /home/ali/cognee/data/.cognee_system/databases`
+
+Erkenntnis aus der Vorklärung als ADR-042 dokumentiert: bei zukünftiger Migration von `DATA_ROOT_DIRECTORY` (nicht aktuell, weil DBs vor Move leer waren) müssten zusätzlich die absoluten Pfade in der `Data`-Tabelle (`raw_data_location`, `original_data_location`) umgeschrieben werden.
+
 ##### Verbleibende Schritte (offen)
 
-- Schritt 3: Datenbanken aus venv-Pfad nach /home/ali/cognee/data/ verschieben (technische Schuld aus Schritt 1)
 - Schritt 4: Multi-User-Access-Control entscheiden für HiMeS-Integration
 - Schritt 5: Voice-Memo-zu-Markdown-Pipeline bauen (Whisper-Output → Daily-Log-Format)
 - Schritt 6: Markdown-Pipeline an Cognee anbinden (Daily-Log → Knowledge Graph)
@@ -965,7 +981,6 @@ Validierung gegen VPS-Originale durchgeführt: einzige bewusste Abweichung ist A
 
 ##### Bekannte technische Schuld
 
-- Cognee-Datenbanken liegen aktuell im venv-Verzeichnis (nicht ideal — bei venv-Recreate Datenverlust). Schritt 3 löst das.
 - Multi-User-Access-Control standardmäßig aktiv. Entscheidung in Schritt 4.
 - ANTHROPIC_API_KEY auf VPS doppelt gesetzt (Debug-Artefakt). Optional aufräumen wenn gewünscht.
 
