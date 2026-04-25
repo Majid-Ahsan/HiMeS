@@ -102,10 +102,13 @@ fi
 # 3. Pruefen ob ein Cognee-Prozess laeuft. Falls ja, abbrechen —
 #    eine laufende SQLite/LanceDB-Verbindung waere ein Korruptions-
 #    Risiko bei einem mv.
-if pgrep -f 'cognee|smoke_test\.py' > /dev/null 2>&1; then
-    echo "FEHLER: Cognee-Prozess laeuft (pgrep -f 'cognee|smoke_test')." >&2
+#    Pattern verlangt 'python' im Kommando, damit das Skript sich
+#    nicht selbst matcht (Skript-Pfad enthaelt 'cognee').
+COGNEE_PROC_RE='python.*cognee|python.*smoke_test\.py'
+if pgrep -f "$COGNEE_PROC_RE" > /dev/null 2>&1; then
+    echo "FEHLER: Cognee-Prozess laeuft (pgrep -f '$COGNEE_PROC_RE')." >&2
     echo "Bitte erst stoppen, dann Skript erneut starten." >&2
-    pgrep -af 'cognee|smoke_test\.py' >&2 || true
+    pgrep -af "$COGNEE_PROC_RE" >&2 || true
     exit 3
 fi
 
