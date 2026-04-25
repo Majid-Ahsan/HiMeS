@@ -50,9 +50,20 @@ Future Work (im Anhang dokumentiert, im MVP nicht erstellt):
 
 ## Übersicht
 
-HiMeS speichert Wissen als Markdown-Dateien in `/var/himes-data/`
-(außerhalb Git). Cognee indexiert diese Dateien in einen Knowledge
-Graph für schnelle, semantische Suche.
+HiMeS speichert Wissen als Markdown-Dateien in einem konfigurierbaren
+Daten-Verzeichnis (außerhalb Git, im Folgenden `<data-dir>`). Cognee
+indexiert diese Dateien in einen Knowledge Graph für schnelle,
+semantische Suche.
+
+`<data-dir>` wird vom Voice-Memo-Mapper (`pipeline/voice_to_md.py`)
+und von Cognee in dieser Reihenfolge bestimmt:
+1. `--data-dir`-Argument (falls gesetzt)
+2. Umgebungsvariable `HIMES_DATA_DIR`
+3. Default `~/himes-data/`
+
+Konkrete Werte:
+- Mac (Entwicklung): `~/himes-data/` (Default)
+- VPS (Production): `/home/ali/himes-data/` (via `HIMES_DATA_DIR`)
 
 ## Die 10 Grundregeln
 
@@ -205,7 +216,7 @@ und erstellt die .md-Datei mit Frontmatter und Text-Body.
 
 ### Dateipfad und Benennung
 
-`/var/himes-data/memory/daily-logs/YYYY-MM-DD_user.md`
+`<data-dir>/memory/daily-logs/YYYY-MM-DD_user.md`
 
 Beispiele:
 - `2026-04-23_majid.md`
@@ -286,7 +297,7 @@ Telegram-Accounts) kommt in späterer Phase.
 
 ### Vollständiges MVP-Beispiel
 
-Datei: `/var/himes-data/memory/daily-logs/2026-04-23_taha.md`
+Datei: `<data-dir>/memory/daily-logs/2026-04-23_taha.md`
 
 ```markdown
 ---
@@ -382,6 +393,7 @@ siehe Regel 5.)
 - 2026-04-23: Cleanup. Regel 3 auf neue Dateinamen-Konvention (vorname-nachname.md) aktualisiert. Platzhalter `<n>` zu `<name>` an drei Stellen korrigiert. Header-Status auf Phase 2.1 aktualisiert. Offene-Punkte-Eintrag für Beziehungs-Vokabular präzisiert.
 - 2026-04-23: Beziehungs-Vokabular für rel_to_anchor vollständig definiert (9 semantische Gruppen, 44 Werte). Vokabular für rel_via formalisiert (4 Werte). Unterscheidung mütterlich/väterlich konsequent über rel_via gelöst.
 - 2026-04-25: MVP-Cleanup. Schema reduziert auf das, was für den MVP-Pfad (Voice-Memo → MD → Cognee → Jarvis-Antwort) tatsächlich nötig ist. Daily-Log-Frontmatter auf 3 Pflichtfelder + 2 optionale Felder reduziert. `detected_events`, `actions_created`, `entries` aus dem Daily-Log-Schema gestrichen (Tickets sind separates Konzept). Regel 10 auf 4 Memory-Typen aktualisiert (ADR-035). Tag-Sprache auf deutsch festgeschrieben. Memory-Typ 2, 2a und 4 als Future Work markiert. Vollständige Original-Spezifikationen (Entity-Person, Insights, Beziehungs-Vokabular, detected_events) in den Anhang verschoben — bleiben erhalten, sind aber klar von der MVP-Spec abgegrenzt.
+- 2026-04-25: Daten-Pfad parametrisiert. `/var/himes-data/` durch `<data-dir>` ersetzt; Default `~/himes-data/`, überschreibbar via `HIMES_DATA_DIR` oder `--data-dir`. Auf VPS gilt `/home/ali/himes-data/`. Begründung: der Voice-Memo-Mapper läuft sowohl auf Mac (Dev) als auch auf VPS (Production), beide brauchen unterschiedliche Pfade ohne Code-Änderung.
 
 ---
 
@@ -470,7 +482,7 @@ Jedes extrahierte Event hatte zwei Schichten gehabt:
 1. **Memory-Schicht:** Das Event wäre im `detected_events:`-Array des
    Daily-Log-Frontmatters gespeichert worden.
 2. **Action-Schicht:** Für actionable Events hätte Jarvis automatisch
-   ein Ticket in `/var/himes-data/tickets/inbox/` erstellt, referenziert
+   ein Ticket in `<data-dir>/tickets/inbox/` erstellt, referenziert
    im `actions_created:`-Feld.
 
 Diese Architektur ist für eine spätere Phase nicht ausgeschlossen, im
@@ -485,7 +497,7 @@ basierend auf Daily-Log-Erwähnungen (passive Strategie, ADR-036).
 
 ### A2.1 Dateipfad und Benennung
 
-Pfad: `/var/himes-data/memory/entities/<vorname-nachname>.md`
+Pfad: `<data-dir>/memory/entities/<vorname-nachname>.md`
 
 Format: Kleinbuchstaben, Umlaute erhalten, Vorname und Nachname
 durch Bindestrich getrennt.
@@ -602,7 +614,7 @@ Interpretationen. Siehe A3 für Details zur Insights-Datei.
 
 ### A2.7 Vollständiges Beispiel Entity-Datei
 
-Datei: `/var/himes-data/memory/entities/reza-ahmadi.md`
+Datei: `<data-dir>/memory/entities/reza-ahmadi.md`
 
 ```markdown
 ---
@@ -667,7 +679,7 @@ Fakten missverstanden werden.
 
 ### A3.2 Dateipfad und Benennung
 
-Pfad: `/var/himes-data/memory/insights/<vorname-nachname>.md`
+Pfad: `<data-dir>/memory/insights/<vorname-nachname>.md`
 
 Derselbe Dateiname wie die Entity-Datei, nur in anderem Verzeichnis.
 
@@ -716,7 +728,7 @@ Entity-Datei.
 
 ### A3.7 Vollständiges Beispiel Insights-Datei
 
-Datei: `/var/himes-data/memory/insights/reza-ahmadi.md`
+Datei: `<data-dir>/memory/insights/reza-ahmadi.md`
 
 ```markdown
 ---
