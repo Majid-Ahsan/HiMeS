@@ -636,6 +636,43 @@ class ClaudeBackend(Protocol):
 
 ---
 
+## 2b. ENTWICKLUNGS-WORKFLOW (Stage 2)
+
+HiMeS folgt einem Stage-2-Feature-Branch-Workflow seit 2026-04-23 (siehe ADR-038). Frühere Workflows sind im historischen Abschnitt bei der ursprünglichen Sektion dokumentiert (siehe "Historisch — Uncommitted-VPS-State (bis Phase 1.5.21)").
+
+### Drei-Orte-Architektur
+
+- **Mac** (`/Users/ahsan/Documents/Claude/HiMeS`): Development-Umgebung. Hier werden alle Änderungen entwickelt und getestet.
+- **GitHub** (`Majid-Ahsan/HiMeS`): Quelle der Wahrheit (single source of truth). Alle Änderungen müssen über GitHub laufen.
+- **VPS** (`/home/ali/HiMeS` auf `116.203.134.101`): Production-Umgebung. VPS pullt von GitHub, niemals direkter Edit auf VPS.
+
+### Standard-Workflow für Code-Änderungen
+
+1. Auf Mac: `git checkout -b feature/branch-name`
+2. Änderungen entwickeln und testen
+3. `git commit`, `git push origin feature/branch-name`
+4. Auf GitHub: Branch reviewen
+5. Auf Mac: `git checkout main`, `git merge --no-ff feature/branch`
+6. `git push origin main`
+7. Auf VPS: `git pull origin main`
+8. Falls nötig: `docker-compose rebuild`
+
+### Standard-Workflow für reine Doku-Änderungen
+
+Identisch wie oben. VPS-Pull optional bei reiner Doku.
+
+### Verboten
+
+- Direkte Code-Edits auf VPS (außer Notfall-Hotfix)
+- Direktes Pushen zu main ohne Feature-Branch (außer triviale Doku)
+- Konfigurationen oder Code auf VPS ohne Spiegelung im Repo
+
+### Ausnahme: Geheimnisse
+
+Geheime Konfigurations-Werte wie API-Keys leben nur auf VPS in `.env`-Dateien (via `.gitignore` ausgeschlossen). Im Repo nur `.env.example` mit Platzhaltern.
+
+---
+
 ## 3. TECH STACK
 
 Python 3.11 · Claude Code CLI (stream-json Subprocess) · python-telegram-bot · aiohttp · asyncio · Docker + docker-compose (himes + db-rest) · Hetzner VPS · Pydantic BaseSettings · structlog · openai-whisper (lokal) · derhuerst/db-rest:6 (self-hosted HAFAS)
@@ -956,9 +993,15 @@ Für regelmäßige Restarts (Code-Deploys) bleibt `docker compose up -d --build 
 - **2026-04-17**: Block entfernt, weil der Bot keinen HTTP-Server hatte — Container ging in Restart-Loop.
 - **Reaktivierung**: erst wenn Phase 1.5.8 den /health-Endpoint implementiert hat (siehe Status-Tabelle). Reihenfolge strikt: erst Endpoint, dann Healthcheck-Block zurück in compose.
 
-### Uncommitted-VPS-State als Design-Pattern (nicht Bug)
+### Historisch — Uncommitted-VPS-State (bis Phase 1.5.21)
 
-Mehrere Phasen haben historisch Code direkt auf der VPS eingecheckt (nicht via git) und erst später auf Local/GitHub nachgezogen. Das ist dokumentiert in Phase 1.5.21 und hier bewusst akzeptiert — VPS ist Working-Copy, Local ist Canonical Repository, GitHub ist Remote of Record. Bei jedem größeren Update-Zyklus: VPS → Local → GitHub sync.
+Bis Phase 1.5.21 hat das Projekt einen VPS-First-Workflow verwendet (VPS als Working-Copy, Sync-Richtung VPS → Local → GitHub). Dies war pragmatisch für die frühe Entwicklung, wurde aber 2026-04-23 durch den Stage-2-Feature-Branch-Workflow abgelöst (siehe Sektion 2b und ADR-038).
+
+Original-Doku zur historischen Referenz:
+
+> **Uncommitted-VPS-State als Design-Pattern (nicht Bug)**
+>
+> Mehrere Phasen haben historisch Code direkt auf der VPS eingecheckt (nicht via git) und erst später auf Local/GitHub nachgezogen. Das ist dokumentiert in Phase 1.5.21 und hier bewusst akzeptiert — VPS ist Working-Copy, Local ist Canonical Repository, GitHub ist Remote of Record. Bei jedem größeren Update-Zyklus: VPS → Local → GitHub sync.
 
 ### Home Assistant Remote-Zugriff (Phase 1.5.33, pending)
 
@@ -1082,6 +1125,7 @@ Referenz: GitHub Issue #34 des claude-agent-sdk-Repos. Relevant für Phase 1.5.2
 | 035 | Memory-Typen reduziert auf 4 (Phase 2.1 Vorarbeit, 2026-04-23): HiMeS speichert nur Daily-Log, Entity-Person, Insights, Conversation — also nur das was in keinem anderen Tool existiert (Gedanken-Strom, persönliche Sicht auf Menschen, Charaktermuster, Jarvis-Gespräche). Ort, Medikament, Konzept, Meeting, Research werden in Calendar/Notion/etc. gespeichert, nicht in HiMeS. Vermeidet Doppel-Speicherung; Jarvis als Orchestrator routet Anfragen zur richtigen Quelle. | Akzeptiert |
 | 036 | Initial-Daten-Strategie passiv (Phase 2.1 Vorarbeit, 2026-04-23): Familien-Daten werden nicht initial via Setup-Skript eingegeben. Jarvis erstellt Entity-Dateien organisch beim Erkennen in Daily-Logs und fragt bei Bedarf nach. Nur die Anchor-Datei `majid-ahsan.md` wird initial erstellt. Vermeidet Cold-Start-Datenpflege-Aufwand und liefert nur Daten die tatsächlich gebraucht werden. | Akzeptiert |
 | 037 | Drei-Schichten-Gedächtnis mit Dreaming-Phase (2026-04-23): Konzept eingebracht von Majid: Kurzzeit/Mittelzeit/Langzeit-Gedächtnis mit nächtlicher Sortierung um 3:30 Uhr durch Jarvis. Architektur betrifft alle Memory-Typen (Memory-Typ 4 Conversation eng verbunden). Verhältnis zu ADR-015 (3-Layer Memory: MEMORY.md + Cognee Graph + Rules) noch zu klären. Volle Spezifikation steht aus. | In Diskussion |
+| 038 | Stage-2-Feature-Branch-Workflow als Standard (2026-04-25): Mac entwickelt, GitHub ist Quelle der Wahrheit, VPS pullt. Direkte VPS-Edits verboten (außer Notfall-Hotfix). Feature-Branches für alle nicht-trivialen Änderungen, `--no-ff` Merges. Löst den früheren VPS-First-Workflow ab (siehe Phase 1.5.21 Doku, jetzt historisiert). Volle Spezifikation in Sektion 2b. | Akzeptiert |
 
 ---
 
