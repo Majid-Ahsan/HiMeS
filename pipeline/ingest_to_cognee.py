@@ -11,14 +11,20 @@ kein Whisper, keine LLM-Datums-Erkennung, kein MCP, keine Cognee-Visu.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Damit das Skript von ueberall aufgerufen werden kann (auch ohne PYTHONPATH).
+_repo_root = Path(__file__).resolve().parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
+
 import argparse
 import asyncio
 import hashlib
 import json
 import os
-import sys
 from datetime import datetime, date as date_cls
-from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
