@@ -1117,16 +1117,47 @@ Inspiriert von „Dumbledore Think Tank". User-Wunsch:
 
 User hat explizit gesagt: „nicht jetzt, baue ich später, soll aber nicht vergessen werden." Auslöser für späteren Bau: wenn Telegram-Eingabe via Jarvis nicht ausreicht — zu lange Daily-Logs, formatierte Eingabe, oder Bulk-Upload.
 
-### Phase 2.21 — Repo-Konsolidierung (niedrige Priorität, nicht-blockierend)
+### Phase 2.21 — Repo-Konsolidierung (✓ erledigt 2026-04-26 via subtree-squash)
 
-Aktuell liegt `caldav-mcp/` als eigenes Repo neben `HiMeS/` (Verzeichnis-Ebene `/Users/ahsan/Documents/Claude/`). User möchte alles in einem Ordner haben.
+Ursprünglich niedrig priorisiert: `caldav-mcp/` lag als eigenes Repo neben `HiMeS/`. Optionen waren git-submodule, git-subtree oder simples `mv`. Entscheidung am 2026-04-26 zugunsten **git-subtree mit Squash** über ein temporäres Backup-Repo (`Majid-Ahsan/caldav-mcp-backup`) als Push-Vermittler vom VPS:
 
-Optionen:
-1. **git-submodule** — sauber, aber operative Komplexität (Submodule-Updates)
-2. **git-subtree** — alles in einem Repo, History bleibt
-3. **Hineinverschieben** (einfaches `mv`) — verliert Git-History des caldav-mcp-Forks (von madbonez)
+- VPS hatte 6 Commits voraus (Master des fast toten Forks `madbonez/caldav-mcp`), Mac-Standalone hatte 420 Zeilen uncommitted (verworfen)
+- VPS pushte aktuellen Stand (HEAD `1870046`, Phase 1.5.29b) ins temporäre Backup-Repo
+- Mac (HiMeS-Repo) zog via `git subtree add --prefix=vendor/caldav-mcp ... --squash` — alle 6 Commits zu einem Squash-Commit verdichtet, Original-History im Backup-Repo erhalten
+- Endzustand: `vendor/caldav-mcp/` mit 28 Dateien, ~652 KB, identisch auf Mac/GitHub/VPS
 
-Entscheidung offen. Niedrig priorisiert, blockiert nichts.
+`/home/ali/caldav-mcp/` (VPS) und `/Users/ahsan/Documents/Claude/caldav-mcp/` (Mac) blieben erstmal als Rollback-Backup stehen — siehe Phase-4-Aufräum-Backlog unten.
+
+### Phase 4 — caldav-mcp Service-Umstellung (2026-04-26 ✓)
+
+Folge-Phase nach 2.21 Repo-Konsolidierung. Ziel: laufenden caldav-mcp-Service so umstellen, dass der Bug-A-Code-Fix (ADR-045) im laufenden System aktiv wird, Bind-Adresse auf Loopback gehärtet, Service-Manager statt ad-hoc-Prozess.
+
+**Phase 3 (vorgelagert) — defensiver Code-Fix für ADR-045**: in `vendor/caldav-mcp/src/mcp_caldav/client.py` neue Exception `RecurringEventNotSupportedError`, Detection-Loop in `update_event` über `target_event.icalendar_instance.walk()` für VEVENT mit RRULE oder RECURRENCE-ID. 4 Tests in `tests/test_update_event_recurring.py`, 109+4 grün. System-Prompt-Edit bewusst rausgehalten (Atomarität).
+
+**Mini-Phase 4.0 — `--host` CLI-Flag**: `vendor/caldav-mcp/` um `--host` Click-Option erweitert (Default `127.0.0.1`, Loopback-only). Hardcoded `host="0.0.0.0"` in `server.py:765` durch parametrisierten Wert ersetzt. Macht den unsicheren Bind opt-in via `--host 0.0.0.0`. 2 Tests in `tests/test_server_bind.py`.
+
+**Phase 4.A-D — Service-Umstellung**: bei der Aufklärung stellte sich heraus, dass der laufende mcp-caldav-Prozess **kein** eigener systemd-Service war (PPID=1, manuell adoptiert nach `nohup`/`disown`). Stattdessen entdeckt: bestehende `jarvis-caldav.service` als Auto-Restarter, die schon vorher dort lebte. Diese Unit direkt auf VPS via `nano` editiert:
+
+- `WorkingDirectory=/home/ali/HiMeS/vendor/caldav-mcp`
+- `EnvironmentFile=/home/ali/HiMeS/vendor/caldav-mcp/.env`
+- `ExecStart=/home/ali/.local/bin/uv run mcp-caldav --env-file /home/ali/HiMeS/vendor/caldav-mcp/.env --transport sse --host 127.0.0.1 --port 8001`
+- `daemon-reload` + `systemctl restart jarvis-caldav.service`
+
+`.env` aus `/home/ali/caldav-mcp/.env` nach `/home/ali/HiMeS/vendor/caldav-mcp/.env` kopiert (Permissions auf `600` gesetzt). `vendor/caldav-mcp/.gitignore` schützt `.env` vor Versionierung. `.venv` im vendor-Pfad via `uv sync` neu gebaut.
+
+Reverse-Proxy-Setup: Caddy (`/etc/caddy/Caddyfile`, lauscht `:80`+`:443`) routet `caldav-ahsan.duckdns.org` → `127.0.0.1:8001`. Caddy unverändert, Backend transparent getauscht.
+
+**Phase 4.E — Bot-Prompt**: TERMIN-ÄNDERUNG-Sektion in `core/claude_subprocess.py` um Recurring-Branch erweitert: bei `caldav_update_event`-Fehler mit `'recurring series'` keine `caldav_create_event`-Alternative, stattdessen User auf Apple Calendar verweisen.
+
+**Verifikation**: `ss -tlnp` zeigt Bind auf `127.0.0.1:8001` (vorher `0.0.0.0`). End-to-End via Caddy: `curl -sI https://caldav-ahsan.duckdns.org/sse` → HTTP/2 200 mit `content-type: text/event-stream`. Telegram-Test ("welche Termine habe ich morgen?") → korrekte Antwortliste. Service-Auto-Restart durch systemd verifiziert.
+
+**Status**: Bug A im laufenden System gefixt. ADR-045 als „aktiv im Service" markiert. ADR-046 (Bot-Async-Deadlock) bleibt offen — `Restart=on-failure` greift bei echten Crashes, deckt aber Deadlocks ohne Crash nicht ab (würde HTTP-Watchdog brauchen).
+
+**Aufräum-Backlog (separate Phase)**:
+- `/home/ali/caldav-mcp/` auf VPS löschen (alter Standalone-Ordner, bisher Rollback-Backup)
+- `/Users/ahsan/Documents/Claude/caldav-mcp/` auf Mac löschen
+- GitHub-Backup-Repo `Majid-Ahsan/caldav-mcp-backup` löschen (oder als History-Backup behalten)
+- **Wichtig**: `jarvis-caldav.service`-Unit-Datei lebt aktuell **nur auf VPS**, ist nicht im Repo versioniert. Bei VPS-Neuaufsetzung müsste sie manuell wiederhergestellt werden. Optionale spätere Phase: `infra/systemd/`-Ordner anlegen und Unit dort einchecken (Plan B aus Phase 4.C wurde nicht umgesetzt, weil das Problem auf VPS direkt gelöst wurde — würde sich aber nachholen lassen).
 
 ---
 
@@ -1334,7 +1365,7 @@ Referenz: GitHub Issue #34 des claude-agent-sdk-Repos. Relevant für Phase 1.5.2
 | 042 | Cognee speichert absolute Pfade in Data-Metadata (2026-04-25): Die SQLite-Tabelle `Data` (cognee/modules/data/models/Data.py) enthält die Spalten `raw_data_location` und `original_data_location` mit absoluten Pfaden zu ingestierten Dateien. Diese zeigen typischerweise unter `DATA_ROOT_DIRECTORY`. Konsequenz: bei zukünftiger Migration von `DATA_ROOT_DIRECTORY` (im Gegensatz zu `SYSTEM_ROOT_DIRECTORY`, das nur DB-Container-Pfade beeinflusst) reicht ein `mv` der Daten-Dateien nicht — die Pfade in der SQLite-Metadata müssen ebenfalls umgeschrieben werden, sonst zeigen `raw_data_location`/`original_data_location` ins Leere. Aktuell (Phase 2.1 Schritt 3) irrelevant, weil DBs leer sind und Erstbefuellung nach Move passiert. Erkenntnis aus Phase-A-Aufklärung der Daten-Dir-Migration. | Akzeptiert (Erkenntnis) |
 | 043 | Cognee Multi-User-Access-Control Default akzeptiert (Phase 2.1 Schritt 4, 2026-04-25): `ENABLE_BACKEND_ACCESS_CONTROL` bleibt AN (Cognee-Default). Cognee verwaltet User-Trennung damit automatisch. Aktuell Single-User (nur Majid), aber Default ist bereits multi-user-ready für späteren Ausbau (Telegram-Multi-User mit Neda/Taha/Hossein). Konsistent mit ADR-035 (Anchor-System multi-user-vorbereitet). Blockiert nichts: Schalter kann bei zukünftigem Bedarf ohne Datenverlust revidiert werden. | Akzeptiert |
 | 044 | Cognee lädt .env CWD-abhängig + Skript-Path-Setup + SearchType weggelassen (2026-04-26): Cognee 1.0.3 liest seine .env-Datei nur aus dem aktuellen Working-Directory. Pipeline-Skripte (ingest_to_cognee.py, cognee_search.py) lösen das dreifach: (1) eigenes .env-Loading via pipeline/_cognee_env.py BEVOR cognee importiert wird; (2) sys.path-Manipulation am Skript-Header (`Path(__file__).resolve().parent.parent` in sys.path), damit das `pipeline`-Paket auch ohne PYTHONPATH gefunden wird, wenn das Skript von beliebigem CWD aus aufgerufen wird (`python3 /pfad/zu/cognee_search.py "query"` aus / oder /tmp); (3) `cognee.search()` wird OHNE `query_type=` aufgerufen — Cognee-Default (GRAPH_COMPLETION) liefert beste Antworten für natural-language Queries und der konkrete SearchType-Import-Pfad variiert zwischen Cognee-Versionen (cognee.shared.data_models in <1.0 vs cognee.modules.search.types.SearchType in 1.0.3), darum für MVP weggelassen. ImportError-Behandlung wurde entsprechend verschärft: nur `ModuleNotFoundError` mit `e.name == "cognee"` wird mit freundlicher Meldung maskiert, alle anderen ImportErrors aus Cognee-Internals werden durchgereicht (voller Stack-Trace), damit echte Ursachen sichtbar bleiben. Konsequenz für später: MCP-Server (Schritt 7) und Whisper-Pipeline müssen dasselbe Pattern (env-Loading + sys.path-Setup) nutzen; falls dort spezifische SearchTypes nötig werden, dort als optionaler Parameter wieder einbauen. Test: cognee_search.py aus / aufgerufen findet die DBs korrekt und liefert sinnvolle Antworten. | Akzeptiert (Workaround) |
-| 045 | Termin-Update-Routing-Bug (2026-04-25): Bei Termin-Update via Foto-Eingabe ruft Jarvis `caldav_create_event` statt `caldav_update_event`. Folge: Doppel-Termin entsteht, alter Termin bleibt, Jarvis bestätigt fälschlich „aktualisiert". Belegfall: Elternsprechtag Hossein 7. Mai 2026 — User schickte Foto mit „Termin update", Jarvis erstellte zweiten Termin statt bestehenden zu aktualisieren. Ursache: System-Prompt enthält explizite TERMIN-ÄNDERUNG-Regel (siehe Phase 1.5.17, „NIEMALS neuen Termin erstellen → IMMER caldav_search → caldav_update_event"), aber LLM ignorierte sie. Reines Prompt-Tuning reicht offenbar nicht. Lösung offen, wird im Rahmen Phase 2.18 (Tool-Routing-Disziplin) systematisch angegangen — möglich durch strengere Tool-Beschreibungen, Beispiele im Prompt oder Pre-Validation-Schritt vor `caldav_create_event`. Workaround: User korrigiert manuell. **Update 2026-04-26**: Defensiver Code-Fix deployed in `vendor/caldav-mcp/` — neue Exception `RecurringEventNotSupportedError` blockiert `caldav_update_event` für Recurring-Series (Detection via RRULE auf Master-VEVENT oder RECURRENCE-ID auf Override). Bot erhält klaren Fehlerstring statt stiller Master-Mutation. Aktivierung pending: laufender systemd-Service auf VPS nutzt noch `/home/ali/caldav-mcp/`, Fix wird erst aktiv wenn systemd auf vendor-Pfad umgebogen ist (separate Phase). | Code-Fix deployed, Aktivierung pending |
+| 045 | Termin-Update-Routing-Bug (2026-04-25): Bei Termin-Update via Foto-Eingabe ruft Jarvis `caldav_create_event` statt `caldav_update_event`. Folge: Doppel-Termin entsteht, alter Termin bleibt, Jarvis bestätigt fälschlich „aktualisiert". Belegfall: Elternsprechtag Hossein 7. Mai 2026 — User schickte Foto mit „Termin update", Jarvis erstellte zweiten Termin statt bestehenden zu aktualisieren. Ursache: System-Prompt enthält explizite TERMIN-ÄNDERUNG-Regel (siehe Phase 1.5.17, „NIEMALS neuen Termin erstellen → IMMER caldav_search → caldav_update_event"), aber LLM ignorierte sie. Reines Prompt-Tuning reicht offenbar nicht. Lösung offen, wird im Rahmen Phase 2.18 (Tool-Routing-Disziplin) systematisch angegangen — möglich durch strengere Tool-Beschreibungen, Beispiele im Prompt oder Pre-Validation-Schritt vor `caldav_create_event`. Workaround: User korrigiert manuell. **Update 2026-04-26 (Code-Fix deployed)**: Defensiver Code-Fix deployed in `vendor/caldav-mcp/` — neue Exception `RecurringEventNotSupportedError` blockiert `caldav_update_event` für Recurring-Series (Detection via RRULE auf Master-VEVENT oder RECURRENCE-ID auf Override). Bot erhält klaren Fehlerstring statt stiller Master-Mutation. **Update 2026-04-26 (final, aktiv im Service)**: Phase 4 abgeschlossen — `jarvis-caldav.service` (bestehender systemd-Auto-Restarter) auf `/home/ali/HiMeS/vendor/caldav-mcp/` umgestellt, zusätzlich Bind via `--host 127.0.0.1` auf Loopback gehärtet (Mini-Phase 4.0 CLI-Flag). System-Prompt um Recurring-Branch in TERMIN-ÄNDERUNG-Sektion erweitert. Bug A im laufenden System gefixt; verifiziert via `curl https://caldav-ahsan.duckdns.org/sse` → HTTP/2 200 und Telegram-Test. Volle Phase-4-Doku siehe Phase-2.21-Block. | Behoben — aktiv im Service (2026-04-26) |
 | 046 | Bot Async-Generator-Deadlock (2026-04-25/26): HiMeS-Bot deadlocked nach 25.04.2026 17:50 — keine Telegram-Antworten mehr für ~14h. Logs zeigen async-Generator-Cleanup-Race: „aclose(): asynchronous generator is already running" plus „Cancelled via cancel scope ... in different task than entered". Self-Healing erst durch Container-Restart am 26.04.2026 08:23. Wichtige Beobachtung: CalDAV-MCP-Service selbst war die ganze Zeit gesund (lokal und extern via curl bestätigt — HTTP 200 auf beiden), Problem lag im SDK-Client / mcp-remote-Client im Bot. Ursache vermutlich Race im `SubprocessCLITransport._read_messages_impl` oder in der `SDKClient`-Singleton-Restart-Logik (siehe ADR-024 SDK-Limit, OPS-NOTES SDK-Usage). Workaround: Container-Restart heilt es. Mögliche Lösungen für später: Self-Healing-Logik (Bot erkennt Deadlock und restartet sich), bessere async-Cleanup-Pattern, oder Upgrade auf neuere claude-code-sdk-Version falls Bug dort gefixt. | Bug bekannt, sporadisch |
 
 ---
@@ -1346,9 +1377,6 @@ Top-level Sammlung offener Bugs und akzeptierter Schuld, projektweit (nicht phas
 Cognee-spezifische Schuld wurde 2026-04-26 aus Phase 2.1 hierher migriert.
 
 ### Offene Bugs
-
-**Termin-Update-Routing (ADR-045)**
-Foto-Eingabe „Termin update" führt zu `caldav_create_event` statt `caldav_update_event` — Doppel-Termin entsteht. Belegfall: Elternsprechtag Hossein 7. Mai 2026. Reines Prompt-Tuning reicht nicht (TERMIN-ÄNDERUNG-Regel aus Phase 1.5.17 wurde ignoriert). Lösung folgt im Rahmen Phase 2.18 (Tool-Routing-Disziplin). **Update 2026-04-26**: Defensiver Code-Fix vorhanden in `vendor/caldav-mcp/` (Guard `RecurringEventNotSupportedError` bei RRULE/RECURRENCE-ID), noch nicht aktiv im laufenden Service — VPS-systemd zeigt weiterhin auf `/home/ali/caldav-mcp/`. Aktivierung in separater Phase zusammen mit systemd-Umstellung. Bis dahin: User soll bei Recurring-Events manuell in Apple Calendar bleiben.
 
 **Bot Async-Generator-Deadlock (ADR-046)**
 Sporadischer Bot-Deadlock — Belegfall 25./26.04.2026 mit ~14h Stille. Async-Generator-Cleanup-Race im SDK-Client / mcp-remote-Client im Bot. CalDAV-MCP selbst war gesund (HTTP 200 verifiziert). Workaround: Container-Restart heilt. Lösung offen — Optionen: Self-Healing-Logik im Bot, bessere async-Cleanup-Pattern, oder Upgrade auf neuere claude-code-sdk-Version.
