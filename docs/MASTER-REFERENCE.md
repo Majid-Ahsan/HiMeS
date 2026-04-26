@@ -1,5 +1,5 @@
 # HiMeS — MASTER REFERENCE
-> **Version:** v25.12 · **Stand:** 2026-04-25 · **Pfad:** `docs/MASTER-REFERENCE.md`
+> **Version:** v25.13 · **Stand:** 2026-04-26 · **Pfad:** `docs/MASTER-REFERENCE.md`
 > **Nutzung:** `Lies docs/MASTER-REFERENCE.md und fahre fort mit Phase [X.Y]: [Task].`
 > **Nach Task:** Status in dieser Datei updaten + committen.
 
@@ -984,10 +984,50 @@ Blockiert nichts: bei zukünftigem Bedarf kann der Schalter ohne Datenverlust re
 
 Volle Begründung als ADR-043 dokumentiert.
 
+##### Schritt 5 — Voice-Memo-zu-Markdown-Pipeline (2026-04-25) ✓
+
+Mapper-Skript baut/erweitert tagesweise Daily-Log-Markdown-Dateien aus Whisper-Transkripten. Stdlib-only (kein pyyaml), kompatibel mit dem in `docs/memory-schema.md` definierten Daily-Log-Format.
+
+Skripte und Tests:
+- `pipeline/voice_to_md.py` — Mapper, drei Aufruf-Modi (Stdin, `--file`, `--text`)
+- `pipeline/test_voice_to_md.py` — 16 Tests, alle grün
+- Branch: `feature/pipeline-voice-to-md`
+
+Optionen:
+- `--user` (Default `majid`, validiert gegen `^[a-zA-Z0-9_-]+$` als Path-Traversal-Schutz)
+- `--date` (Default heute Berlin-TZ), `--time`, `--data-dir`
+
+Verhalten:
+- Output-Pfad: `<data-dir>/memory/daily-logs/<YYYY-MM-DD>_<user>.md`
+- Pflicht-Frontmatter `type/date/user` wird beim ersten Append erzeugt
+- Erster Eintrag bekommt `## (Erster Eintrag)`-Heading, Folge-Einträge `## HH:MM`
+
+VPS-Test (2026-04-25): drei Erfolgskriterien-Tests grün — neue Datei korrekt erzeugt (Frontmatter + erster Eintrag), Append in bestehende Datei korrekt platziert, expliziter `--date` und `--time` werden respektiert.
+
+##### Schritt 6 — Markdown-zu-Cognee-Pipeline (2026-04-26) ✓
+
+Daily-Logs werden via SHA-Hash-Tracking in den Cognee-Knowledge-Graph eingespeist. Re-Ingest passiert automatisch wenn sich der Hash ändert (Option Y aus der Vorklärung), Tracking-State liegt in `<data-dir>/.ingested.json` (Option A).
+
+Skripte und Tests:
+- `pipeline/ingest_to_cognee.py` — Ingest-Skript, drei Modi (`--file`, `--dir`, `--all`), Date-Validation-Prompt vor jedem Ingest, `--yes` für Automation
+- `pipeline/cognee_search.py` — CLI-Suche aus beliebigem CWD (Bonus aus der Bugfix-Runde)
+- `pipeline/_cognee_env.py` — Helper, lädt `cognee/.env` BEVOR cognee importiert wird
+- 56 Pipeline-Tests grün (16 voice_to_md + 20 ingest + 10 env + 10 search)
+- Branches: `feature/pipeline-ingest-to-cognee`, `fix/cognee-env-loading`, `fix/cognee-search-bugs`
+
+Cognee-Aufrufe pro Datei: `cognee.add()` + `cognee.cognify()`.
+
+VPS-Verifikation (2026-04-26):
+- Test-Daily-Log → 25 Knoten / 46 Kanten extrahiert
+- `cognee_search.py "Was hat Majid heute gemacht?"` liefert strukturierten Tagesablauf
+- Knowledge-Graph-Beziehungen korrekt extrahiert (z.B. `majid --[family_member]--> neda`)
+- Visualisierung via `cognee.visualize_graph()` funktioniert
+- Pipeline funktioniert von beliebigem CWD aus (nach Bugfixes)
+
+Bugfix-Runde während Schritt 6 — drei Bugs gefunden und behoben, alle in ADR-044 dokumentiert: (1) Cognee 1.0.3 lädt `.env` CWD-abhängig → `_cognee_env.py` löst es vor dem Cognee-Import; (2) `cognee_search.py` SearchType-Import-Pfad variiert zwischen Cognee-Versionen → SearchType komplett rausgenommen, Cognee-Default (GRAPH_COMPLETION) reicht für natural-language Queries; (3) Skripte funktionierten nicht ohne `PYTHONPATH` → sys.path-Setup am Skript-Header (`Path(__file__).resolve().parent.parent` in sys.path).
+
 ##### Verbleibende Schritte (offen)
 
-- Schritt 5: Voice-Memo-zu-Markdown-Pipeline bauen (Whisper-Output → Daily-Log-Format)
-- Schritt 6: Markdown-Pipeline an Cognee anbinden (Daily-Log → Knowledge Graph)
 - Schritt 7: Cognee als MCP-Tool für Jarvis registrieren (Memory-Queries aus Chat)
 - Schritt 8: End-to-End-Test (Voice-Memo abends → morgens Frage stellen → korrekte Antwort)
 
@@ -1504,6 +1544,7 @@ Aufwand: 15-30 Min.
 
 | Datum | v | Änderung |
 |---|---|---|
+| 2026-04-26 | 25.13 | Phase 2.1 Schritte 5+6 ✓. Schritt 5 (Voice-Memo→Markdown, 2026-04-25, Branch `feature/pipeline-voice-to-md`): `pipeline/voice_to_md.py` (stdlib-only, drei Aufruf-Modi Stdin/`--file`/`--text`, `--user`/`--date`/`--time`/`--data-dir`, Path-Traversal-Schutz für `--user`, `## (Erster Eintrag)`/`## HH:MM` Append-Pattern), 16 Tests grün, drei VPS-Erfolgskriterien-Tests verifiziert. Schritt 6 (Markdown→Cognee, 2026-04-26, Branches `feature/pipeline-ingest-to-cognee` + `fix/cognee-env-loading` + `fix/cognee-search-bugs`): `pipeline/ingest_to_cognee.py` (drei Modi `--file`/`--dir`/`--all`, SHA-Hash-Tracking in `<data-dir>/.ingested.json`, Re-Ingest bei Hash-Änderung, Date-Validation-Prompt mit `--yes`-Override), `pipeline/cognee_search.py` (CLI-Suche aus beliebigem CWD), `pipeline/_cognee_env.py` (lädt cognee/.env vor cognee-Import), 56 Pipeline-Tests grün (16+20+10+10), VPS-verifiziert: 25 Knoten/46 Kanten aus Test-Daily-Log, Knowledge-Graph-Beziehungen korrekt extrahiert (`majid --[family_member]--> neda`), `cognee.visualize_graph()` funktioniert. Drei Bugs während Schritt 6 gefunden und gefixt (alle in ADR-044): Cognee-CWD-abhängiges .env-Loading, SearchType-Import-Pfad versions-instabil → ohne `query_type=` aufrufen, sys.path-Setup am Skript-Header für CWD-unabhängige Aufrufe. Schritte 5 und 6 aus „Verbleibende Schritte" entfernt — offen bleiben Schritt 7 (Cognee als MCP-Tool für Jarvis) und Schritt 8 (End-to-End-Test). Keine neue technische Schuld. |
 | 2026-04-11 | 1 | Initiales Dokument |
 | 2026-04-11 | 2 | +Prompt-Templates, +Changelog, +Phase 2 Abhängigkeiten, +Self-Improvement, +Eval, +ADR |
 | 2026-04-11 | 3 | +MCP-Katalog (24 Server), +Time/Filesystem KRITISCH, +Brave Search 1.5.9 |
