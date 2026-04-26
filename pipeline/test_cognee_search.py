@@ -6,6 +6,8 @@ Cognee wird vollstaendig gemockt — kein echter Cognee-Aufruf in Tests.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -22,23 +24,10 @@ from pipeline import cognee_search  # noqa: E402
 
 @pytest.fixture
 def fake_cognee(monkeypatch):
-    """Inject a fake `cognee` module + `cognee.shared.data_models.SearchType`."""
+    """Inject a fake top-level `cognee` module."""
     fake_root = types.ModuleType("cognee")
     fake_root.search = AsyncMock(return_value=["antwort 1", "antwort 2"])
-
-    fake_shared = types.ModuleType("cognee.shared")
-    fake_data_models = types.ModuleType("cognee.shared.data_models")
-
-    class _SearchType:
-        GRAPH_COMPLETION = "GRAPH_COMPLETION"
-        SUMMARIES = "SUMMARIES"
-        INSIGHTS = "INSIGHTS"
-
-    fake_data_models.SearchType = _SearchType
-
     monkeypatch.setitem(sys.modules, "cognee", fake_root)
-    monkeypatch.setitem(sys.modules, "cognee.shared", fake_shared)
-    monkeypatch.setitem(sys.modules, "cognee.shared.data_models", fake_data_models)
     return fake_root
 
 
@@ -60,8 +49,9 @@ def test_default_call_invokes_cognee_search(fake_cognee, fake_cognee_dir, capsys
     assert fake_cognee.search.call_count == 1
     kwargs = fake_cognee.search.call_args.kwargs
     assert kwargs["query_text"] == "Was hat Majid heute gemacht?"
-    assert kwargs["query_type"] == "GRAPH_COMPLETION"
     assert kwargs["top_k"] == 10
+    # query_type wird BEWUSST nicht uebergeben — Cognee-Default (GRAPH_COMPLETION).
+    assert "query_type" not in kwargs
 
     out = capsys.readouterr().out
     assert "Cognee-Verzeichnis" in out
@@ -103,27 +93,6 @@ def test_top_k_passed_through(fake_cognee, fake_cognee_dir):
     assert fake_cognee.search.call_args.kwargs["top_k"] == 5
 
 
-def test_search_type_passed_through(fake_cognee, fake_cognee_dir):
-    rc = cognee_search.main([
-        "--cognee-dir", str(fake_cognee_dir),
-        "--search-type", "SUMMARIES",
-        "frage",
-    ])
-    assert rc == 0
-    assert fake_cognee.search.call_args.kwargs["query_type"] == "SUMMARIES"
-
-
-def test_unknown_search_type_errors(fake_cognee, fake_cognee_dir, capsys):
-    rc = cognee_search.main([
-        "--cognee-dir", str(fake_cognee_dir),
-        "--search-type", "DOES_NOT_EXIST",
-        "frage",
-    ])
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert "DOES_NOT_EXIST" in err
-
-
 def test_missing_query_errors(fake_cognee, fake_cognee_dir, capsys):
     rc = cognee_search.main(["--cognee-dir", str(fake_cognee_dir)])
     assert rc == 1
@@ -143,10 +112,9 @@ def test_empty_results(fake_cognee, fake_cognee_dir, capsys):
 
 
 def test_cognee_missing_exits_with_clear_message(monkeypatch, fake_cognee_dir, capsys):
-    # Make `import cognee` raise ImportError by setting sys.modules entry to None.
+    # Make `import cognee` raise ModuleNotFoundError(name='cognee')
+    # by setting sys.modules entry to None.
     monkeypatch.setitem(sys.modules, "cognee", None)
-    monkeypatch.setitem(sys.modules, "cognee.shared", None)
-    monkeypatch.setitem(sys.modules, "cognee.shared.data_models", None)
 
     rc = cognee_search.main([
         "--cognee-dir", str(fake_cognee_dir),
@@ -154,16 +122,69 @@ def test_cognee_missing_exits_with_clear_message(monkeypatch, fake_cognee_dir, c
     ])
     assert rc == 1
     err = capsys.readouterr().err
-    assert "cognee nicht verfuegbar" in err
+    assert "cognee Library nicht installiert" in err
 
 
-def test_cognee_search_runtime_error_hints_env(fake_cognee, fake_cognee_dir, capsys):
+def test_internal_module_not_found_propagates(monkeypatch, fake_cognee_dir):
+    """Sub-Modul-ImportError aus cognee-Internal wird NICHT maskiert."""
+    fake_root = types.ModuleType("cognee")
+
+    async def _search_with_internal_import_error(**_kwargs):
+        raise ModuleNotFoundError(
+            "No module named 'cognee.shared.data_models'",
+            name="cognee.shared.data_models",
+        )
+
+    fake_root.search = _search_with_internal_import_error
+    monkeypatch.setitem(sys.modules, "cognee", fake_root)
+
+    with pytest.raises(ModuleNotFoundError) as excinfo:
+        cognee_search.main([
+            "--cognee-dir", str(fake_cognee_dir),
+            "frage",
+        ])
+    assert excinfo.value.name == "cognee.shared.data_models"
+
+
+def test_runtime_error_propagates(fake_cognee, fake_cognee_dir):
+    """Andere Exceptions (z.B. SQLite-Fehler) werden durchgereicht — kein
+    irrefuehrender Wrapper-Text mehr."""
     fake_cognee.search.side_effect = RuntimeError("sqlite operational error")
-    rc = cognee_search.main([
-        "--cognee-dir", str(fake_cognee_dir),
-        "frage",
-    ])
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert "Cognee-Suche" in err
-    assert ".env" in err
+    with pytest.raises(RuntimeError, match="sqlite operational error"):
+        cognee_search.main([
+            "--cognee-dir", str(fake_cognee_dir),
+            "frage",
+        ])
+
+
+def test_subprocess_call_without_pythonpath(tmp_path):
+    """Skript-Aufruf von beliebigem CWD ohne PYTHONPATH funktioniert.
+
+    Fuehrt das Skript via subprocess aus /tmp aus, mit gestripptem
+    PYTHONPATH. Pipeline-Paket muss trotzdem importierbar sein (sys.path-
+    Setup im Skript-Header). Cognee selbst ist hier nicht installiert,
+    daher erwarten wir die freundliche Fehlermeldung — entscheidend ist,
+    dass es NICHT an `No module named 'pipeline'` scheitert.
+    """
+    (tmp_path / ".env").write_text("LLM_API_KEY=x\n", encoding="utf-8")
+    script = Path(__file__).resolve().parent / "cognee_search.py"
+
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+
+    result = subprocess.run(
+        [
+            sys.executable, str(script),
+            "--cognee-dir", str(tmp_path),
+            "test",
+        ],
+        cwd="/tmp",
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    # Der Pipeline-Import darf NICHT scheitern.
+    assert "No module named 'pipeline'" not in result.stderr, (
+        f"Pipeline-Import scheitert ohne PYTHONPATH:\n"
+        f"stderr: {result.stderr}\nstdout: {result.stdout}"
+    )
