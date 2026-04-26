@@ -732,8 +732,18 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent]:
         ]
 
 
-async def run_server(transport: str = "stdio", port: int = 8000) -> None:
-    """Run the MCP CalDAV server with the specified transport."""
+async def run_server(
+    transport: str = "stdio",
+    host: str = "127.0.0.1",
+    port: int = 8000,
+) -> None:
+    """Run the MCP CalDAV server with the specified transport.
+
+    For SSE transport, ``host`` controls the bind interface. The default
+    ``127.0.0.1`` keeps the server reachable only via loopback — pair with
+    a reverse proxy (e.g. Caddy, nginx) for external exposure. Pass
+    ``0.0.0.0`` to bind on all interfaces.
+    """
     if transport == "sse":
         from mcp.server.sse import SseServerTransport
         from starlette.applications import Starlette
@@ -762,7 +772,7 @@ async def run_server(transport: str = "stdio", port: int = 8000) -> None:
 
         import uvicorn
 
-        config = uvicorn.Config(starlette_app, host="0.0.0.0", port=port)
+        config = uvicorn.Config(starlette_app, host=host, port=port)
         server = uvicorn.Server(config)
         await server.serve()
     else:
