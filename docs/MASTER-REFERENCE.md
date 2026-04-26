@@ -1,5 +1,5 @@
 # HiMeS — MASTER REFERENCE
-> **Version:** v25.13 · **Stand:** 2026-04-26 · **Pfad:** `docs/MASTER-REFERENCE.md`
+> **Version:** v25.14 · **Stand:** 2026-04-26 · **Pfad:** `docs/MASTER-REFERENCE.md`
 > **Nutzung:** `Lies docs/MASTER-REFERENCE.md und fahre fort mit Phase [X.Y]: [Task].`
 > **Nach Task:** Status in dieser Datei updaten + committen.
 
@@ -849,6 +849,10 @@ Neda 7. Juli · Hossein 17. Juli · Majid 23. Juli · Taha 21. Oktober
 | 2.15 | MCP Welle 2: Kernfunktionen | ⬜ Geplant | 1.5.23 | Maps, DB, Wetter, Search, Reminder, Notion, Gmail, HA |
 | 2.16 | MCP Welle 3: Erweiterungen | ⬜ Geplant | 2.15 | Telegram, Spotify, Twilio, Currency, Exa, Firecrawl, GitHub |
 | 2.17 | Eigener DB-MCP (transport.rest) | 1.5.19 | — | Erweiterung des aktuellen self-hosted `db-rest` (PaulvonBerg). Eigener MCP auf `transport.rest`-API für erweitertes A→B-Routing mit Geo-Awareness, Multi-Modal-Alternativen und Deutschland-weiter Verkehrsintegration. NACH Phase 1.5-Abschluss. Aufwand geschätzt 2-3 Wochen. |
+| 2.18 | Tool-Routing-Disziplin | 2.1 (Schritt 7+8) | — | Jarvis entscheidet intelligent welches Tool für welche Frage zuständig ist (Cognee/Notion/CalDAV/Things3/Memory). Heute teilweise via Prompt-Regeln gelöst; Cognee dazu zu bringen wird komplexer. Bug ADR-045 (Termin-Update-Routing) gehört hierher als Sub-Problem. |
+| 2.19 | Multi-Action aus einer Eingabe | 2.18 | — | Gemischte Voice-Memos parallel auf Cognee (Daily-Log), CalDAV (Termin), Things3 (Task), Notion (Patient/Finding) routen — in einem User-Turn. Heute funktioniert „Task + Termin zusammen"; Cognee + Notion-Anteile parallel zu Task/Termin sind neu. |
+| 2.20 | Web-UI für Daily-Log-Eingabe | — | — | Inspiriert von „Dumbledore Think Tank". Textbox + Datums-Picker, optional Audio-Upload (Whisper → Pipeline). Alternative zu SSH-Eingabe. User-Wunsch explizit: „nicht jetzt, baue ich später, soll aber nicht vergessen werden". Auslöser für späteren Bau: wenn Telegram-Eingabe via Jarvis nicht ausreicht (lange Daily-Logs, formatierte Eingabe, Bulk-Upload). |
+| 2.21 | Repo-Konsolidierung | — | — | `caldav-mcp/` liegt aktuell als eigenes Repo neben `HiMeS/`. User möchte alles in einem Ordner. Optionen: git-submodule, git-subtree oder Hineinverschieben (verliert Git-History des caldav-mcp-Forks). Niedrige Priorität, nicht-blockierend. |
 
 ### Phase 2.1 — Cognee-Evaluierung (2026-04-15)
 
@@ -1026,14 +1030,44 @@ VPS-Verifikation (2026-04-26):
 
 Bugfix-Runde während Schritt 6 — drei Bugs gefunden und behoben, alle in ADR-044 dokumentiert: (1) Cognee 1.0.3 lädt `.env` CWD-abhängig → `_cognee_env.py` löst es vor dem Cognee-Import; (2) `cognee_search.py` SearchType-Import-Pfad variiert zwischen Cognee-Versionen → SearchType komplett rausgenommen, Cognee-Default (GRAPH_COMPLETION) reicht für natural-language Queries; (3) Skripte funktionierten nicht ohne `PYTHONPATH` → sys.path-Setup am Skript-Header (`Path(__file__).resolve().parent.parent` in sys.path).
 
+##### Schritt 7 — Cognee als MCP für Jarvis (Aufklärung 2026-04-26 ✓, Bau offen)
+
+Aufklärungs-Session am 2026-04-26 hat Architektur-Constraint, Topologie-Optionen und MVP-Tool-Design geklärt. Eigentlicher Bau folgt als nächstes.
+
+**Architektur-Constraint:** Cognee läuft auf VPS in eigenem venv (`/home/ali/cognee/.venv`). HiMeS-Bot läuft im Docker-Container ohne Cognee-Library. Konsequenz: Cognee-MCP kann nicht im Bot-Container laufen — er braucht Zugriff auf das Cognee-venv außerhalb.
+
+**Drei Topologie-Optionen identifiziert:**
+- T1: Cognee-MCP als separater VPS-Host-Service im Cognee-venv, Bot-Container greift via mcp-remote/SSE zu (analog CalDAV-Pattern)
+- T2: Cognee komplett in Bot-Container — verworfen, Image-Bloat
+- T3: Hybrid — schmaler stdio-Wrapper im Container plus FastAPI-Layer vor Cognee
+- Empfehlung: T1.
+
+**Framework:** FastMCP (analog `himes_db`, vorhandene Vorlage).
+
+**Repo-Lage:** `cognee-setup/mcp/` im HiMeS-Repo (nicht eigenes Repo).
+
+**MVP-Tool:** nur `cognee_search(query, top_k)`. Schreib-Operationen (`cognee_ingest`) bleiben über die Pipeline (Schritt 6), nicht über MCP.
+
+**Auth/Env-Pattern:** `_cognee_env.py`-Mechanismus aus ADR-044 wird auch hier genutzt — lädt Cognee-`.env` BEVOR Cognee importiert wird.
+
+**Tool-Naming:** `mcp__cognee__cognee_search` (Server-Name `cognee`, Tool-Name `cognee_search`, konsistent mit `mcp__deutsche-bahn__db_…`).
+
+**Test-Pattern:** Mock auf `cognee.search` (Module-Boundary), Pattern wie `tests/test_server_tools.py`.
+
+**Wichtige Beobachtung aus der Aufklärung:** `_ALLOWED_TOOLS`-Whitelist in `core/sdk_client.py` muss erweitert werden — sonst bleibt der Server unsichtbar. Server läuft, aber LLM sieht ihn nicht in der Tool-Liste (siehe ADR-027 Tool-Whitelist-Strategie).
+
+**Zwei Entscheidungen pending vom User vor dem Bau:**
+1. Topologie T1 (mcp-remote/SSE) vs T3 (HTTP-API) — finale Wahl
+2. Repo-Lage `cognee-setup/mcp/` bestätigen oder eigenes Repo?
+
 ##### Verbleibende Schritte (offen)
 
-- Schritt 7: Cognee als MCP-Tool für Jarvis registrieren (Memory-Queries aus Chat)
+- Schritt 7: Cognee als MCP-Tool für Jarvis registrieren — Aufklärung ✓ 2026-04-26 (siehe oben), Bau offen
 - Schritt 8: End-to-End-Test (Voice-Memo abends → morgens Frage stellen → korrekte Antwort)
 
-##### Bekannte technische Schuld
+Nach Schritt 8 folgt Phase 2.18 (Tool-Routing-Disziplin) — siehe Phase-2-Tabelle. Bug ADR-045 (Termin-Update-Routing) gehört zu 2.18.
 
-- ANTHROPIC_API_KEY auf VPS doppelt gesetzt (Debug-Artefakt). Optional aufräumen wenn gewünscht.
+Bekannte technische Schuld dieser Phase: zur Top-Level-Sektion 13a migriert (2026-04-26).
 
 ### Phase 2.13 — Use-Case: WebUntis-Integration (Tahas Stundenplan)
 
@@ -1046,6 +1080,53 @@ Kein fertiger MCP verfügbar (Stand 2026-04-16). Drei Optionen für zukünftige 
 Empfehlung: Option 1 (iCal) zuerst probieren, bei Bedarf eskalieren.
 
 Parallel: HOCH-MCPs einrichten (Gmail, Google Drive, CardDAV, Maps, HA)
+
+### Phase 2.18 — Tool-Routing-Disziplin (geplant nach Phase 2.1 Schritt 7+8)
+
+Jarvis muss intelligent entscheiden, welches Tool für welche Frage zuständig ist. Aktuelle Tool-Landschaft:
+
+- **Cognee** — Daily-Log, Personen-Beziehungen, Insights, Conversations (was nirgendwo anders existiert, siehe ADR-035)
+- **Notion** — strukturierte Daten: Patienten, Findings, Treatments, Diagnosen
+- **CalDAV** — Termine, Kalender
+- **Things 3** — Tasks, ToDos
+- **Memory** (`MEMORY.md`) — persistente Notizen / Short-term
+
+Heute teilweise gelöst durch Prompt-Regeln (TERMIN-ÄNDERUNG, Notion-DB-Zuordnung, etc.). Cognee dazu zu bringen wird komplexer, weil Daily-Log/Insights/Conversations konzeptionell überlappen können.
+
+**Zugehöriger Bug**: ADR-045 (Termin-Update-Routing) gehört als Sub-Problem hierher — beweist, dass reines Prompt-Tuning nicht reicht. Mögliche Lösungs-Bausteine: strengere Tool-Beschreibungen, Beispiele im Prompt, Pre-Validation-Schritt vor `caldav_create_event`.
+
+### Phase 2.19 — Multi-Action aus einer Eingabe (geplant nach 2.18)
+
+Bei gemischtem Voice-Memo (Beispiel: „Reza kommt Freitag, Heftgummi kaufen, Patient X bekam Bisoprolol") muss Jarvis in einem einzigen User-Turn:
+
+- Daily-Log-Aspekt nach **Cognee**
+- Termin-Aspekt nach **CalDAV**
+- Task-Aspekt nach **Things 3**
+- Patient-Aspekt nach **Notion**
+
+Heute funktioniert „Task + Termin zusammen" (laut User-Beobachtung). Cognee-Anteil + Notion-Anteil parallel zu Task/Termin sind neu und müssen verlässlich werden — sonst gehen Aspekte verloren oder werden falsch geroutet.
+
+### Phase 2.20 — Web-UI für Daily-Log-Eingabe (geplant)
+
+Inspiriert von „Dumbledore Think Tank". User-Wunsch:
+
+- Web-Oberfläche mit Textbox
+- Datums-Picker
+- Optional File-Upload (z.B. Audio → Whisper → bestehende Pipeline)
+- Alternative zu SSH-Eingabe der Pipeline-Skripte aus Phase 2.1 Schritt 5+6
+
+User hat explizit gesagt: „nicht jetzt, baue ich später, soll aber nicht vergessen werden." Auslöser für späteren Bau: wenn Telegram-Eingabe via Jarvis nicht ausreicht — zu lange Daily-Logs, formatierte Eingabe, oder Bulk-Upload.
+
+### Phase 2.21 — Repo-Konsolidierung (niedrige Priorität, nicht-blockierend)
+
+Aktuell liegt `caldav-mcp/` als eigenes Repo neben `HiMeS/` (Verzeichnis-Ebene `/Users/ahsan/Documents/Claude/`). User möchte alles in einem Ordner haben.
+
+Optionen:
+1. **git-submodule** — sauber, aber operative Komplexität (Submodule-Updates)
+2. **git-subtree** — alles in einem Repo, History bleibt
+3. **Hineinverschieben** (einfaches `mv`) — verliert Git-History des caldav-mcp-Forks (von madbonez)
+
+Entscheidung offen. Niedrig priorisiert, blockiert nichts.
 
 ---
 
@@ -1253,6 +1334,29 @@ Referenz: GitHub Issue #34 des claude-agent-sdk-Repos. Relevant für Phase 1.5.2
 | 042 | Cognee speichert absolute Pfade in Data-Metadata (2026-04-25): Die SQLite-Tabelle `Data` (cognee/modules/data/models/Data.py) enthält die Spalten `raw_data_location` und `original_data_location` mit absoluten Pfaden zu ingestierten Dateien. Diese zeigen typischerweise unter `DATA_ROOT_DIRECTORY`. Konsequenz: bei zukünftiger Migration von `DATA_ROOT_DIRECTORY` (im Gegensatz zu `SYSTEM_ROOT_DIRECTORY`, das nur DB-Container-Pfade beeinflusst) reicht ein `mv` der Daten-Dateien nicht — die Pfade in der SQLite-Metadata müssen ebenfalls umgeschrieben werden, sonst zeigen `raw_data_location`/`original_data_location` ins Leere. Aktuell (Phase 2.1 Schritt 3) irrelevant, weil DBs leer sind und Erstbefuellung nach Move passiert. Erkenntnis aus Phase-A-Aufklärung der Daten-Dir-Migration. | Akzeptiert (Erkenntnis) |
 | 043 | Cognee Multi-User-Access-Control Default akzeptiert (Phase 2.1 Schritt 4, 2026-04-25): `ENABLE_BACKEND_ACCESS_CONTROL` bleibt AN (Cognee-Default). Cognee verwaltet User-Trennung damit automatisch. Aktuell Single-User (nur Majid), aber Default ist bereits multi-user-ready für späteren Ausbau (Telegram-Multi-User mit Neda/Taha/Hossein). Konsistent mit ADR-035 (Anchor-System multi-user-vorbereitet). Blockiert nichts: Schalter kann bei zukünftigem Bedarf ohne Datenverlust revidiert werden. | Akzeptiert |
 | 044 | Cognee lädt .env CWD-abhängig + Skript-Path-Setup + SearchType weggelassen (2026-04-26): Cognee 1.0.3 liest seine .env-Datei nur aus dem aktuellen Working-Directory. Pipeline-Skripte (ingest_to_cognee.py, cognee_search.py) lösen das dreifach: (1) eigenes .env-Loading via pipeline/_cognee_env.py BEVOR cognee importiert wird; (2) sys.path-Manipulation am Skript-Header (`Path(__file__).resolve().parent.parent` in sys.path), damit das `pipeline`-Paket auch ohne PYTHONPATH gefunden wird, wenn das Skript von beliebigem CWD aus aufgerufen wird (`python3 /pfad/zu/cognee_search.py "query"` aus / oder /tmp); (3) `cognee.search()` wird OHNE `query_type=` aufgerufen — Cognee-Default (GRAPH_COMPLETION) liefert beste Antworten für natural-language Queries und der konkrete SearchType-Import-Pfad variiert zwischen Cognee-Versionen (cognee.shared.data_models in <1.0 vs cognee.modules.search.types.SearchType in 1.0.3), darum für MVP weggelassen. ImportError-Behandlung wurde entsprechend verschärft: nur `ModuleNotFoundError` mit `e.name == "cognee"` wird mit freundlicher Meldung maskiert, alle anderen ImportErrors aus Cognee-Internals werden durchgereicht (voller Stack-Trace), damit echte Ursachen sichtbar bleiben. Konsequenz für später: MCP-Server (Schritt 7) und Whisper-Pipeline müssen dasselbe Pattern (env-Loading + sys.path-Setup) nutzen; falls dort spezifische SearchTypes nötig werden, dort als optionaler Parameter wieder einbauen. Test: cognee_search.py aus / aufgerufen findet die DBs korrekt und liefert sinnvolle Antworten. | Akzeptiert (Workaround) |
+| 045 | Termin-Update-Routing-Bug (2026-04-25): Bei Termin-Update via Foto-Eingabe ruft Jarvis `caldav_create_event` statt `caldav_update_event`. Folge: Doppel-Termin entsteht, alter Termin bleibt, Jarvis bestätigt fälschlich „aktualisiert". Belegfall: Elternsprechtag Hossein 7. Mai 2026 — User schickte Foto mit „Termin update", Jarvis erstellte zweiten Termin statt bestehenden zu aktualisieren. Ursache: System-Prompt enthält explizite TERMIN-ÄNDERUNG-Regel (siehe Phase 1.5.17, „NIEMALS neuen Termin erstellen → IMMER caldav_search → caldav_update_event"), aber LLM ignorierte sie. Reines Prompt-Tuning reicht offenbar nicht. Lösung offen, wird im Rahmen Phase 2.18 (Tool-Routing-Disziplin) systematisch angegangen — möglich durch strengere Tool-Beschreibungen, Beispiele im Prompt oder Pre-Validation-Schritt vor `caldav_create_event`. Workaround: User korrigiert manuell. | Bug bekannt, offen |
+| 046 | Bot Async-Generator-Deadlock (2026-04-25/26): HiMeS-Bot deadlocked nach 25.04.2026 17:50 — keine Telegram-Antworten mehr für ~14h. Logs zeigen async-Generator-Cleanup-Race: „aclose(): asynchronous generator is already running" plus „Cancelled via cancel scope ... in different task than entered". Self-Healing erst durch Container-Restart am 26.04.2026 08:23. Wichtige Beobachtung: CalDAV-MCP-Service selbst war die ganze Zeit gesund (lokal und extern via curl bestätigt — HTTP 200 auf beiden), Problem lag im SDK-Client / mcp-remote-Client im Bot. Ursache vermutlich Race im `SubprocessCLITransport._read_messages_impl` oder in der `SDKClient`-Singleton-Restart-Logik (siehe ADR-024 SDK-Limit, OPS-NOTES SDK-Usage). Workaround: Container-Restart heilt es. Mögliche Lösungen für später: Self-Healing-Logik (Bot erkennt Deadlock und restartet sich), bessere async-Cleanup-Pattern, oder Upgrade auf neuere claude-code-sdk-Version falls Bug dort gefixt. | Bug bekannt, sporadisch |
+
+---
+
+## 13a. BEKANNTE BUGS / TECHNISCHE SCHULD
+
+Top-level Sammlung offener Bugs und akzeptierter Schuld, projektweit (nicht phasen-spezifisch). ADRs in Sektion 13 dokumentieren entschiedene Lösungen — diese Sektion sammelt was noch offen ist. Jeder Eintrag verlinkt auf das zuständige ADR oder Phase.
+
+Cognee-spezifische Schuld wurde 2026-04-26 aus Phase 2.1 hierher migriert.
+
+### Offene Bugs
+
+**Termin-Update-Routing (ADR-045)**
+Foto-Eingabe „Termin update" führt zu `caldav_create_event` statt `caldav_update_event` — Doppel-Termin entsteht. Belegfall: Elternsprechtag Hossein 7. Mai 2026. Reines Prompt-Tuning reicht nicht (TERMIN-ÄNDERUNG-Regel aus Phase 1.5.17 wurde ignoriert). Lösung folgt im Rahmen Phase 2.18 (Tool-Routing-Disziplin). Workaround: User korrigiert manuell.
+
+**Bot Async-Generator-Deadlock (ADR-046)**
+Sporadischer Bot-Deadlock — Belegfall 25./26.04.2026 mit ~14h Stille. Async-Generator-Cleanup-Race im SDK-Client / mcp-remote-Client im Bot. CalDAV-MCP selbst war gesund (HTTP 200 verifiziert). Workaround: Container-Restart heilt. Lösung offen — Optionen: Self-Healing-Logik im Bot, bessere async-Cleanup-Pattern, oder Upgrade auf neuere claude-code-sdk-Version.
+
+### Akzeptierte Schuld
+
+**ANTHROPIC_API_KEY auf VPS doppelt gesetzt** (Phase 2.1, Schritt 1)
+Debug-Artefakt aus Cognee-Installation. Cognee braucht nur `LLM_API_KEY`; `ANTHROPIC_API_KEY` ist redundant. Optional aufräumen wenn gewünscht. Migriert hierher 2026-04-26 aus Phase 2.1 „Bekannte technische Schuld".
 
 ---
 
@@ -1544,6 +1648,7 @@ Aufwand: 15-30 Min.
 
 | Datum | v | Änderung |
 |---|---|---|
+| 2026-04-26 | 25.14 | Doku-Update aus Bug-Diagnose- und Aufklärungs-Session (kein Code). (a) Zwei neue ADRs: **ADR-045** Termin-Update-Routing-Bug (Foto-Eingabe „Termin update" → `caldav_create_event` statt `caldav_update_event`, Belegfall Elternsprechtag Hossein 7. Mai 2026, reines Prompt-Tuning reicht nicht). **ADR-046** Bot Async-Generator-Deadlock (25./26.04.2026 ~14h Stille, async-Generator-Cleanup-Race im SDK-Client, CalDAV-MCP selbst gesund — HTTP 200 verifiziert, Workaround Container-Restart). (b) Vier neue Phase-2-Einträge mit Detail-Subsections: **2.18** Tool-Routing-Disziplin (ADR-045 als Sub-Problem hier), **2.19** Multi-Action aus einer Eingabe (Cognee/CalDAV/Things/Notion parallel in einem Turn), **2.20** Web-UI für Daily-Log-Eingabe (User-Wunsch „Dumbledore Think Tank", nicht jetzt aber nicht vergessen), **2.21** Repo-Konsolidierung (caldav-mcp/ in HiMeS/, niedrige Priorität). (c) Phase 2.1 Schritt 7 mit Aufklärungs-Befunden vom 2026-04-26 angereichert: Architektur-Constraint (Cognee-venv außerhalb Bot-Container), drei Topologie-Optionen (T1 mcp-remote/SSE empfohlen, T2 verworfen, T3 Hybrid), FastMCP-Framework, Repo-Lage `cognee-setup/mcp/`, MVP-Tool nur `cognee_search(query, top_k)`, `_cognee_env.py`-Pattern aus ADR-044 wiederverwendet, Tool-Naming `mcp__cognee__cognee_search`, Test-Mock auf `cognee.search`. Wichtige Beobachtung: `_ALLOWED_TOOLS`-Whitelist in `core/sdk_client.py` muss erweitert werden, sonst bleibt der Server unsichtbar. Zwei Entscheidungen pending (T1 vs T3, Repo-Lage). (d) Neue Top-Level-Sektion **13a Bekannte Bugs / Technische Schuld** angelegt — sammelt projektweite offene Probleme (vs. ADRs = entschiedene Lösungen). Cognee-spezifische Schuld („ANTHROPIC_API_KEY auf VPS doppelt") aus Phase 2.1 dorthin migriert. ADR-045 + ADR-046 dort referenziert. |
 | 2026-04-26 | 25.13 | Phase 2.1 Schritte 5+6 ✓. Schritt 5 (Voice-Memo→Markdown, 2026-04-25, Branch `feature/pipeline-voice-to-md`): `pipeline/voice_to_md.py` (stdlib-only, drei Aufruf-Modi Stdin/`--file`/`--text`, `--user`/`--date`/`--time`/`--data-dir`, Path-Traversal-Schutz für `--user`, `## (Erster Eintrag)`/`## HH:MM` Append-Pattern), 16 Tests grün, drei VPS-Erfolgskriterien-Tests verifiziert. Schritt 6 (Markdown→Cognee, 2026-04-26, Branches `feature/pipeline-ingest-to-cognee` + `fix/cognee-env-loading` + `fix/cognee-search-bugs`): `pipeline/ingest_to_cognee.py` (drei Modi `--file`/`--dir`/`--all`, SHA-Hash-Tracking in `<data-dir>/.ingested.json`, Re-Ingest bei Hash-Änderung, Date-Validation-Prompt mit `--yes`-Override), `pipeline/cognee_search.py` (CLI-Suche aus beliebigem CWD), `pipeline/_cognee_env.py` (lädt cognee/.env vor cognee-Import), 56 Pipeline-Tests grün (16+20+10+10), VPS-verifiziert: 25 Knoten/46 Kanten aus Test-Daily-Log, Knowledge-Graph-Beziehungen korrekt extrahiert (`majid --[family_member]--> neda`), `cognee.visualize_graph()` funktioniert. Drei Bugs während Schritt 6 gefunden und gefixt (alle in ADR-044): Cognee-CWD-abhängiges .env-Loading, SearchType-Import-Pfad versions-instabil → ohne `query_type=` aufrufen, sys.path-Setup am Skript-Header für CWD-unabhängige Aufrufe. Schritte 5 und 6 aus „Verbleibende Schritte" entfernt — offen bleiben Schritt 7 (Cognee als MCP-Tool für Jarvis) und Schritt 8 (End-to-End-Test). Keine neue technische Schuld. |
 | 2026-04-11 | 1 | Initiales Dokument |
 | 2026-04-11 | 2 | +Prompt-Templates, +Changelog, +Phase 2 Abhängigkeiten, +Self-Improvement, +Eval, +ADR |
