@@ -40,6 +40,12 @@ logger = logging.getLogger("mcp-caldav")
     help="Transport type (stdio or sse)",
 )
 @click.option(
+    "--host",
+    default="127.0.0.1",
+    help="Interface to bind for SSE transport (default: 127.0.0.1, loopback only). "
+    "Use 0.0.0.0 to expose on all interfaces.",
+)
+@click.option(
     "--port",
     default=8000,
     help="Port to listen on for SSE transport",
@@ -54,6 +60,7 @@ def main(
     verbose: bool,
     env_file: str | None,
     transport: str,
+    host: str,
     port: int,
     caldav_url: str | None,
     caldav_username: str | None,
@@ -91,7 +98,7 @@ def main(
     from . import server
 
     # Run the server with specified transport
-    asyncio.run(server.run_server(transport=transport, port=port))
+    asyncio.run(server.run_server(transport=transport, host=host, port=port))
 
 
 __all__ = ["__version__", "main", "server"]
