@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from pipeline._cognee_env import load_cognee_env
+
 
 DEFAULT_DATA_DIR = "~/himes-data"
 DATA_DIR_ENV = "HIMES_DATA_DIR"
@@ -52,6 +54,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--data-dir",
         help=f"Daten-Basispfad (Default: ${DATA_DIR_ENV} oder {DEFAULT_DATA_DIR})",
+    )
+    parser.add_argument(
+        "--cognee-dir",
+        help="Cognee-Verzeichnis fuer .env-Loading (Default: $COGNEE_DIR oder /home/ali/cognee)",
     )
     parser.add_argument(
         "-y", "--yes", action="store_true",
@@ -415,6 +421,16 @@ def _print_summary(summary: dict) -> None:
         print("  ABBRUCH wegen Fehler.")
 
 
+def _print_cognee_header(cognee_dir: Path) -> None:
+    system_root = os.environ.get("SYSTEM_ROOT_DIRECTORY", "<nicht gesetzt>")
+    if system_root != "<nicht gesetzt>":
+        db_path = f"{system_root.rstrip('/')}/databases"
+    else:
+        db_path = "<nicht gesetzt — Cognee nutzt Default>"
+    print(f"Cognee-Verzeichnis: {cognee_dir}")
+    print(f"Datenbank-Pfad: {db_path}")
+
+
 def main(
     argv: list[str] | None = None,
     prompt_func: Callable[[str], bool] | None = None,
@@ -422,6 +438,9 @@ def main(
     if prompt_func is None:
         prompt_func = _interactive_confirm
     args = _build_parser().parse_args(argv)
+
+    cognee_dir = load_cognee_env(args.cognee_dir)
+    _print_cognee_header(cognee_dir)
 
     try:
         data_dir = resolve_data_dir(args.data_dir)
