@@ -25,6 +25,24 @@ except ImportError as err:
     ) from err
 
 
+class RecurringEventNotSupportedError(Exception):
+    """Raised when update_event is called on a recurring series.
+
+    Defensive guard for ADR-045 / Bug A: modifying a recurring master
+    VEVENT shifts the entire series; modifying an override requires
+    RECURRENCE-ID handling that is not yet implemented. Until that
+    lands, block both cases at detection time so callers get a clean
+    error instead of a silent corruption of the wrong instance.
+    """
+
+
+_RECURRING_NOT_SUPPORTED_MESSAGE = (
+    "Event is part of a recurring series. Update via this tool is not "
+    "supported. Use Apple Calendar app, or delete and recreate the "
+    "entire series."
+)
+
+
 _stale_logger = logging.getLogger("mcp-caldav.stale")
 
 # Error substrings that signal a stale TCP connection to the upstream CalDAV
@@ -1078,6 +1096,24 @@ END:VCALENDAR"""
                 raise ValueError(f"Event with UID {uid} not found")
 
             ical = target_event.icalendar_component
+
+            # Bug A guard (ADR-045): a calendar object resource for a
+            # recurring series carries either an RRULE on the master
+            # VEVENT or an override VEVENT identified by RECURRENCE-ID
+            # (often both, bundled in one VCALENDAR). Walking the full
+            # instance catches both shapes regardless of which VEVENT
+            # icalendar_component picked first.
+            for _comp in target_event.icalendar_instance.walk():
+                if _comp.name != "VEVENT":
+                    continue
+                if (
+                    _comp.get("RRULE") is not None
+                    or _comp.get("RECURRENCE-ID") is not None
+                ):
+                    raise RecurringEventNotSupportedError(
+                        _RECURRING_NOT_SUPPORTED_MESSAGE
+                    )
+
             updated_fields: list[str] = []
 
             if title is not None:
@@ -1166,6 +1202,8 @@ END:VCALENDAR"""
                 result["description"] = str(desc)
             return result
 
+        except RecurringEventNotSupportedError:
+            raise
         except Exception as e:
             raise RuntimeError(f"Failed to update event: {e}") from e
 
