@@ -89,6 +89,7 @@ _ALLOWED_TOOLS: list[str] = [
     "mcp__weather",       # 3 Wetter-Tools
     "mcp__time",          # get_current_time, convert_time
     "mcp__deutsche-bahn", # 9+3 DB/VRR-Tools
+    "mcp__cognee",        # cognee_search (read-only)
 ]
 
 
