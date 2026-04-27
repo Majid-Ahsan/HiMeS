@@ -727,7 +727,7 @@ himes/
 
 ## 5. MCP-KATALOG
 
-### Aktiv (6)
+### Aktiv (7)
 
 | Server | Transport | Tools | Status |
 |---|---|---|---|
@@ -737,6 +737,7 @@ himes/
 | Time | stdio Python | current_time, convert_time (Europe/Berlin) | ✅ |
 | Weather (`@dangahagan/weather-mcp`) | stdio TS | forecast, current_conditions, alerts | ✅ |
 | Deutsche Bahn + VRR | stdio Python | db_search_connections (1+4 Verbindungen, alle Verkehrsmittel, Adressen+POIs), db_departures, db_arrivals, db_find_station, db_nearby_stations, db_trip_details, db_pendler_check, **db_train_live_status** (Live-Tracking: Verspätung, aktuelles Gleis, Gleiswechsel, nächster Halt), db_nrw_stoerungen (zuginfo.nrw) + 3 Timetable-API-Tools (optional). Strukturierte Error-Dicts + HallucinationGuard. | ✅ |
+| Cognee | SSE | cognee_search (Knowledge-Graph-Suche über Daily-Logs/Entities/Insights, read-only). FastMCP aus offiziellem `mcp`-SDK, separater systemd-Service auf VPS im Cognee-venv. Siehe Phase 2.1 Schritt 7 + ADR-047/048/049. | ✅ |
 
 ### Nächste (KRITISCH → HOCH)
 
@@ -1030,44 +1031,65 @@ VPS-Verifikation (2026-04-26):
 
 Bugfix-Runde während Schritt 6 — drei Bugs gefunden und behoben, alle in ADR-044 dokumentiert: (1) Cognee 1.0.3 lädt `.env` CWD-abhängig → `_cognee_env.py` löst es vor dem Cognee-Import; (2) `cognee_search.py` SearchType-Import-Pfad variiert zwischen Cognee-Versionen → SearchType komplett rausgenommen, Cognee-Default (GRAPH_COMPLETION) reicht für natural-language Queries; (3) Skripte funktionierten nicht ohne `PYTHONPATH` → sys.path-Setup am Skript-Header (`Path(__file__).resolve().parent.parent` in sys.path).
 
-##### Schritt 7 — Cognee als MCP für Jarvis (Aufklärung 2026-04-26 ✓, Bau offen)
+##### Schritt 7 — Cognee als MCP für Jarvis (2026-04-27 ✓)
 
-Aufklärungs-Session am 2026-04-26 hat Architektur-Constraint, Topologie-Optionen und MVP-Tool-Design geklärt. Eigentlicher Bau folgt als nächstes.
+Cognee-MCP-Server gebaut, deployed, und end-to-end verifiziert. Aufklärungs-Session vom 2026-04-26 hatte Architektur-Constraint, drei Topologie-Optionen (T1/T2/T3) und MVP-Tool-Design vorgeklärt; T1 wurde gewählt (separater Service auf VPS, Bot greift via mcp-remote/SSE zu — analog CalDAV-Pattern). Volle Begründungen in ADR-047 (Topologie + FastMCP-Variante), ADR-048 (Env-Var-Konfiguration statt Click-CLI) und ADR-049 (Whitelist-Konvention).
 
-**Architektur-Constraint:** Cognee läuft auf VPS in eigenem venv (`/home/ali/cognee/.venv`). HiMeS-Bot läuft im Docker-Container ohne Cognee-Library. Konsequenz: Cognee-MCP kann nicht im Bot-Container laufen — er braucht Zugriff auf das Cognee-venv außerhalb.
+**Skripte und Tests:**
+- `cognee-setup/mcp/server.py` — FastMCP-Server, ein Tool `cognee_search(query, top_k=5) -> dict`, ADR-018-konforme Error-Returns mit deutschem `user_message_hint` und `logging.exception` für VPS-journalctl-Sichtbarkeit
+- `cognee-setup/mcp/__init__.py`, `cognee-setup/mcp/README.md` (Build/Run/Deploy-Notiz)
+- `tests/cognee_mcp/test_server.py` — 5 Tests: happy path, top_k clientseitig gekappt, top_k-Pass-Through, Exception-Handling im ADR-018-Format, Regression für ADR-044 #3 (kein `query_type=`-Kwarg). Mock auf `cognee.search` als Module-Boundary, `pytest.importorskip("mcp", ...)` analog `tests/test_server_tools.py`. 5/5 grün.
+- `core/sdk_client.py` — Eintrag `"mcp__cognee"` zu `_ALLOWED_TOOLS` ergänzt (Server-Prefix-Stil, siehe ADR-049)
+- `config/mcp_config.json` — `cognee`-Server registriert (npx + mcp-remote auf `https://cognee-ahsan.duckdns.org/sse`, 1:1 caldav-Pattern, kein `-y` Flag)
+- Branch: `feature/cognee-mcp-server` (4 Commits: Skelett → Tests → Whitelist → mcp_config), gemerged via PR #1 (`f7cd40d`)
 
-**Drei Topologie-Optionen identifiziert:**
-- T1: Cognee-MCP als separater VPS-Host-Service im Cognee-venv, Bot-Container greift via mcp-remote/SSE zu (analog CalDAV-Pattern)
-- T2: Cognee komplett in Bot-Container — verworfen, Image-Bloat
-- T3: Hybrid — schmaler stdio-Wrapper im Container plus FastAPI-Layer vor Cognee
-- Empfehlung: T1.
+**Lade-Reihenfolge in `server.py` (kritisch, ADR-044):** sys.path-Setup → `pipeline._cognee_env.load_cognee_env()` → erst danach `import cognee` und `from mcp.server.fastmcp import FastMCP`. Falsche Reihenfolge führt zu venv-Default-DB-Pfad statt der migrierten `data/.cognee_system/databases/` (Phase 2.1 Schritt 3).
 
-**Framework:** FastMCP (analog `himes_db`, vorhandene Vorlage).
+**FastMCP-Variante:** `from mcp.server.fastmcp import FastMCP` aus dem offiziellen `mcp`-SDK, NICHT die standalone `fastmcp`-Library. Konsistent mit `himes_db`. Run-Pattern `mcp.run(transport=...)` statt Click-CLI; Host/Port/Transport via `COGNEE_MCP_HOST` / `COGNEE_MCP_PORT` / `COGNEE_MCP_TRANSPORT` Env-Vars (Defaults `127.0.0.1` / `8002` / `sse`). Volle Begründung in ADR-048.
 
-**Repo-Lage:** `cognee-setup/mcp/` im HiMeS-Repo (nicht eigenes Repo).
+**Tool-Naming:** Server-Name `cognee` (FastMCP-Instanz) + Tool-Name `cognee_search` ergibt LLM-facing `mcp__cognee__cognee_search`. In der Whitelist genügt der Server-Prefix `mcp__cognee` (ADR-049).
 
-**MVP-Tool:** nur `cognee_search(query, top_k)`. Schreib-Operationen (`cognee_ingest`) bleiben über die Pipeline (Schritt 6), nicht über MCP.
+**Service auf VPS (`jarvis-cognee.service`, eigene systemd-Unit):**
+- `User=ali`
+- `WorkingDirectory=/home/ali/HiMeS`
+- `EnvironmentFile=/home/ali/cognee/.env`
+- `ExecStart=/home/ali/cognee/.venv/bin/python /home/ali/HiMeS/cognee-setup/mcp/server.py`
+- `Restart=always`, `RestartSec=10`, `TimeoutStartSec=60` (Cognee-Init braucht ~6s, Sicherheits-Puffer)
+- Bind `127.0.0.1:8002` (Loopback, hardened by default — Default im `server.py`-Konstruktor)
 
-**Auth/Env-Pattern:** `_cognee_env.py`-Mechanismus aus ADR-044 wird auch hier genutzt — lädt Cognee-`.env` BEVOR Cognee importiert wird.
+**Caddy-Reverse-Proxy:** `cognee-ahsan.duckdns.org` → `127.0.0.1:8002`. **Zwingend nötig:** `header_up Host {upstream_hostport}` im `reverse_proxy`-Block, sonst antwortet FastMCP/uvicorn (mcp-SDK 1.27.0) mit HTTP 421 Misdirected Request, weil der Original-Host-Header nicht zum Bind passt. Pattern-Notiz für künftige FastMCP-Server hinter Caddy — siehe Sektion 13a. caldav-mcp ist nicht betroffen (anderes/permissiveres Host-Check-Verhalten).
 
-**Tool-Naming:** `mcp__cognee__cognee_search` (Server-Name `cognee`, Tool-Name `cognee_search`, konsistent mit `mcp__deutsche-bahn__db_…`).
+**DuckDNS:** `cognee-ahsan.duckdns.org` zeigt auf `116.203.134.101` (gleicher VPS wie caldav).
 
-**Test-Pattern:** Mock auf `cognee.search` (Module-Boundary), Pattern wie `tests/test_server_tools.py`.
+**VPS-Verifikation (2026-04-27):**
+- `git pull` von `feature/cognee-mcp-server` (Merge `f7cd40d`) → 7 Dateien / +229 Zeilen, fast-forward
+- `uv pip install mcp --python /home/ali/cognee/.venv/bin/python`: 3 neue Pakete (`mcp 1.27.0`, `httpx-sse 0.4.3`, `sse-starlette 3.4.1`), keine Cognee-Stack-Veränderungen (cognee 1.0.3, pydantic, httpx, anyio, fastapi, starlette, uvicorn unverändert)
+- Smoke-Test (vor systemd): Server läuft, Port 8002 LISTEN nach ~6s, `curl -sI http://127.0.0.1:8002/sse` → HTTP 200, sauberer SIGTERM-Shutdown
+- DB-Pfad korrekt aus `.env` geladen: `/home/ali/cognee/data/.cognee_system/databases` (nicht venv-Fallback) — Beweis dass `load_cognee_env()` greift
+- Externer Reach via Caddy: `curl -sI https://cognee-ahsan.duckdns.org/sse` → HTTP 200 (nach Host-Rewrite-Fix)
+- Bot-Image neu gebaut (`docker compose up -d --build himes`); Bot-Logs zeigen `allowed_tools_active count=8` (vorher 7) — Cognee-Server jetzt für LLM sichtbar
 
-**Wichtige Beobachtung aus der Aufklärung:** `_ALLOWED_TOOLS`-Whitelist in `core/sdk_client.py` muss erweitert werden — sonst bleibt der Server unsichtbar. Server läuft, aber LLM sieht ihn nicht in der Tool-Liste (siehe ADR-027 Tool-Whitelist-Strategie).
+**Sicherheit/Hygiene während des Deploys:**
+- Notion-Token rotiert (alter Token wurde während Diagnose-Session im Render-Output sichtbar — siehe Render-Pattern-Schuld in Sektion 13a)
+- `chmod 600 /home/ali/HiMeS/.env` (vorher 664; jetzt konsistent zur caldav-`.env` aus Phase 4)
 
-**Zwei Entscheidungen pending vom User vor dem Bau:**
-1. Topologie T1 (mcp-remote/SSE) vs T3 (HTTP-API) — finale Wahl
-2. Repo-Lage `cognee-setup/mcp/` bestätigen oder eigenes Repo?
+**End-to-End-Verifikation:**
+- Erste Daily-Log `2026-04-14_majid.md` unter `/home/ali/himes-data/memory/daily-logs/`, MVP-Schema-konform (3 Pflicht- + 2 optionale Frontmatter-Felder), 2.827 Bytes
+- `pipeline/ingest_to_cognee.py --file …` ingestet die Datei → 32 Knoten / 68 Kanten im Top-Cluster
+- Telegram-Frage an Jarvis → Bot ruft genau `mcp__cognee__cognee_search` auf (1 tool_call, 2 turns, 15.9s, 5.5 ¢) → liefert Antwort mit korrekt **abgeleiteter** Beziehung „Newsha ist Partnerin von Ali" (steht so nicht im Daily-Log-Text, wurde aus dem Knowledge-Graph extrahiert) — Cognee-Inferenz funktioniert
+
+**Nebenbefunde (nicht in Schritt 7 gefixt, dokumentiert in Sektion 13a):**
+- `_render_mcp_config()` schreibt Live-Tokens in die versionierte `config/mcp_config.json` zurück → permanenter dirty-tree-Status auf VPS, Pull-Konflikte bei Mac-seitigen Änderungen an dieser Datei. Workaround: `git checkout -- config/mcp_config.json` vor Pull (sicher, weil Bot beim nächsten Start neu rendert).
+- FastMCP/uvicorn HTTP 421 ohne `header_up Host` im Caddy-Block.
+- ADR-046 (Bot Async-Generator-Warning) heute beim Bot-Restart sporadisch beobachtet — kein Blocker, bekannt.
 
 ##### Verbleibende Schritte (offen)
 
-- Schritt 7: Cognee als MCP-Tool für Jarvis registrieren — Aufklärung ✓ 2026-04-26 (siehe oben), Bau offen
-- Schritt 8: End-to-End-Test (Voice-Memo abends → morgens Frage stellen → korrekte Antwort)
+- Schritt 8: End-to-End-Test (Voice-Memo abends → morgens Frage stellen → korrekte Antwort) — am 2026-04-27 **partiell** verifiziert (manueller Daily-Log → Cognee → Search → LLM-Antwort über Telegram), volle Voice→Whisper→Pipeline→Cognee-Kette über Telegram-Voice-Eingabe noch ausstehend.
 
 Nach Schritt 8 folgt Phase 2.18 (Tool-Routing-Disziplin) — siehe Phase-2-Tabelle. Bug ADR-045 (Termin-Update-Routing) gehört zu 2.18.
 
-Bekannte technische Schuld dieser Phase: zur Top-Level-Sektion 13a migriert (2026-04-26).
+Bekannte technische Schuld dieser Phase: zur Top-Level-Sektion 13a migriert (2026-04-26, erweitert 2026-04-27 um Render-Pattern und Caddy-421).
 
 ### Phase 2.13 — Use-Case: WebUntis-Integration (Tahas Stundenplan)
 
@@ -1157,7 +1179,7 @@ Reverse-Proxy-Setup: Caddy (`/etc/caddy/Caddyfile`, lauscht `:80`+`:443`) routet
 - `/home/ali/caldav-mcp/` auf VPS löschen (alter Standalone-Ordner, bisher Rollback-Backup)
 - `/Users/ahsan/Documents/Claude/caldav-mcp/` auf Mac löschen
 - GitHub-Backup-Repo `Majid-Ahsan/caldav-mcp-backup` löschen (oder als History-Backup behalten)
-- **Wichtig**: `jarvis-caldav.service`-Unit-Datei lebt aktuell **nur auf VPS**, ist nicht im Repo versioniert. Bei VPS-Neuaufsetzung müsste sie manuell wiederhergestellt werden. Optionale spätere Phase: `infra/systemd/`-Ordner anlegen und Unit dort einchecken (Plan B aus Phase 4.C wurde nicht umgesetzt, weil das Problem auf VPS direkt gelöst wurde — würde sich aber nachholen lassen).
+- **Wichtig**: Beide Service-Unit-Dateien (`jarvis-caldav.service`, `jarvis-cognee.service` — letztere neu aus Phase 2.1 Schritt 7, 2026-04-27) leben aktuell **nur auf VPS**, sind nicht im Repo versioniert. Auch der Caddy-`reverse_proxy`-Block für `cognee-ahsan.duckdns.org` (mit dem `header_up Host {upstream_hostport}`-Fix gegen FastMCP HTTP 421) lebt nur auf VPS. Bei VPS-Neuaufsetzung müsste alles drei manuell wiederhergestellt werden. Optionale spätere Phase: `infra/systemd/`-Ordner anlegen und Units + relevante Caddy-Snippets dort einchecken (Plan B aus Phase 4.C wurde nicht umgesetzt, weil das Problem auf VPS direkt gelöst wurde — würde sich aber nachholen lassen).
 
 ---
 
@@ -1366,7 +1388,10 @@ Referenz: GitHub Issue #34 des claude-agent-sdk-Repos. Relevant für Phase 1.5.2
 | 043 | Cognee Multi-User-Access-Control Default akzeptiert (Phase 2.1 Schritt 4, 2026-04-25): `ENABLE_BACKEND_ACCESS_CONTROL` bleibt AN (Cognee-Default). Cognee verwaltet User-Trennung damit automatisch. Aktuell Single-User (nur Majid), aber Default ist bereits multi-user-ready für späteren Ausbau (Telegram-Multi-User mit Neda/Taha/Hossein). Konsistent mit ADR-035 (Anchor-System multi-user-vorbereitet). Blockiert nichts: Schalter kann bei zukünftigem Bedarf ohne Datenverlust revidiert werden. | Akzeptiert |
 | 044 | Cognee lädt .env CWD-abhängig + Skript-Path-Setup + SearchType weggelassen (2026-04-26): Cognee 1.0.3 liest seine .env-Datei nur aus dem aktuellen Working-Directory. Pipeline-Skripte (ingest_to_cognee.py, cognee_search.py) lösen das dreifach: (1) eigenes .env-Loading via pipeline/_cognee_env.py BEVOR cognee importiert wird; (2) sys.path-Manipulation am Skript-Header (`Path(__file__).resolve().parent.parent` in sys.path), damit das `pipeline`-Paket auch ohne PYTHONPATH gefunden wird, wenn das Skript von beliebigem CWD aus aufgerufen wird (`python3 /pfad/zu/cognee_search.py "query"` aus / oder /tmp); (3) `cognee.search()` wird OHNE `query_type=` aufgerufen — Cognee-Default (GRAPH_COMPLETION) liefert beste Antworten für natural-language Queries und der konkrete SearchType-Import-Pfad variiert zwischen Cognee-Versionen (cognee.shared.data_models in <1.0 vs cognee.modules.search.types.SearchType in 1.0.3), darum für MVP weggelassen. ImportError-Behandlung wurde entsprechend verschärft: nur `ModuleNotFoundError` mit `e.name == "cognee"` wird mit freundlicher Meldung maskiert, alle anderen ImportErrors aus Cognee-Internals werden durchgereicht (voller Stack-Trace), damit echte Ursachen sichtbar bleiben. Konsequenz für später: MCP-Server (Schritt 7) und Whisper-Pipeline müssen dasselbe Pattern (env-Loading + sys.path-Setup) nutzen; falls dort spezifische SearchTypes nötig werden, dort als optionaler Parameter wieder einbauen. Test: cognee_search.py aus / aufgerufen findet die DBs korrekt und liefert sinnvolle Antworten. | Akzeptiert (Workaround) |
 | 045 | Termin-Update-Routing-Bug (2026-04-25): Bei Termin-Update via Foto-Eingabe ruft Jarvis `caldav_create_event` statt `caldav_update_event`. Folge: Doppel-Termin entsteht, alter Termin bleibt, Jarvis bestätigt fälschlich „aktualisiert". Belegfall: Elternsprechtag Hossein 7. Mai 2026 — User schickte Foto mit „Termin update", Jarvis erstellte zweiten Termin statt bestehenden zu aktualisieren. Ursache: System-Prompt enthält explizite TERMIN-ÄNDERUNG-Regel (siehe Phase 1.5.17, „NIEMALS neuen Termin erstellen → IMMER caldav_search → caldav_update_event"), aber LLM ignorierte sie. Reines Prompt-Tuning reicht offenbar nicht. Lösung offen, wird im Rahmen Phase 2.18 (Tool-Routing-Disziplin) systematisch angegangen — möglich durch strengere Tool-Beschreibungen, Beispiele im Prompt oder Pre-Validation-Schritt vor `caldav_create_event`. Workaround: User korrigiert manuell. **Update 2026-04-26 (Code-Fix deployed)**: Defensiver Code-Fix deployed in `vendor/caldav-mcp/` — neue Exception `RecurringEventNotSupportedError` blockiert `caldav_update_event` für Recurring-Series (Detection via RRULE auf Master-VEVENT oder RECURRENCE-ID auf Override). Bot erhält klaren Fehlerstring statt stiller Master-Mutation. **Update 2026-04-26 (final, aktiv im Service)**: Phase 4 abgeschlossen — `jarvis-caldav.service` (bestehender systemd-Auto-Restarter) auf `/home/ali/HiMeS/vendor/caldav-mcp/` umgestellt, zusätzlich Bind via `--host 127.0.0.1` auf Loopback gehärtet (Mini-Phase 4.0 CLI-Flag). System-Prompt um Recurring-Branch in TERMIN-ÄNDERUNG-Sektion erweitert. Bug A im laufenden System gefixt; verifiziert via `curl https://caldav-ahsan.duckdns.org/sse` → HTTP/2 200 und Telegram-Test. Volle Phase-4-Doku siehe Phase-2.21-Block. | Behoben — aktiv im Service (2026-04-26) |
-| 046 | Bot Async-Generator-Deadlock (2026-04-25/26): HiMeS-Bot deadlocked nach 25.04.2026 17:50 — keine Telegram-Antworten mehr für ~14h. Logs zeigen async-Generator-Cleanup-Race: „aclose(): asynchronous generator is already running" plus „Cancelled via cancel scope ... in different task than entered". Self-Healing erst durch Container-Restart am 26.04.2026 08:23. Wichtige Beobachtung: CalDAV-MCP-Service selbst war die ganze Zeit gesund (lokal und extern via curl bestätigt — HTTP 200 auf beiden), Problem lag im SDK-Client / mcp-remote-Client im Bot. Ursache vermutlich Race im `SubprocessCLITransport._read_messages_impl` oder in der `SDKClient`-Singleton-Restart-Logik (siehe ADR-024 SDK-Limit, OPS-NOTES SDK-Usage). Workaround: Container-Restart heilt es. Mögliche Lösungen für später: Self-Healing-Logik (Bot erkennt Deadlock und restartet sich), bessere async-Cleanup-Pattern, oder Upgrade auf neuere claude-code-sdk-Version falls Bug dort gefixt. | Bug bekannt, sporadisch |
+| 046 | Bot Async-Generator-Deadlock (2026-04-25/26): HiMeS-Bot deadlocked nach 25.04.2026 17:50 — keine Telegram-Antworten mehr für ~14h. Logs zeigen async-Generator-Cleanup-Race: „aclose(): asynchronous generator is already running" plus „Cancelled via cancel scope ... in different task than entered". Self-Healing erst durch Container-Restart am 26.04.2026 08:23. Wichtige Beobachtung: CalDAV-MCP-Service selbst war die ganze Zeit gesund (lokal und extern via curl bestätigt — HTTP 200 auf beiden), Problem lag im SDK-Client / mcp-remote-Client im Bot. Ursache vermutlich Race im `SubprocessCLITransport._read_messages_impl` oder in der `SDKClient`-Singleton-Restart-Logik (siehe ADR-024 SDK-Limit, OPS-NOTES SDK-Usage). Workaround: Container-Restart heilt es. Mögliche Lösungen für später: Self-Healing-Logik (Bot erkennt Deadlock und restartet sich), bessere async-Cleanup-Pattern, oder Upgrade auf neuere claude-code-sdk-Version falls Bug dort gefixt. **Update 2026-04-27**: Warnung sporadisch erneut beobachtet beim Bot-Restart in Phase 2.1 Schritt 7, kein Deadlock entstanden — bestätigt sporadische Natur, nicht-blockierend. | Bug bekannt, sporadisch |
+| 047 | Cognee-MCP Topologie T1 mit FastMCP aus offiziellem mcp-SDK (Phase 2.1 Schritt 7, 2026-04-27): Cognee-MCP läuft als separater systemd-Service auf VPS im Cognee-venv (`/home/ali/cognee/.venv`), Bot-Container greift via `mcp-remote`/SSE auf `https://cognee-ahsan.duckdns.org/sse` zu (analog CalDAV-Pattern, Caddy-Reverse-Proxy auf `127.0.0.1:8002`). Framework: `from mcp.server.fastmcp import FastMCP` aus dem offiziellen `mcp`-SDK (1.27.0), NICHT die standalone `fastmcp`-Library — konsistent mit `himes_db`. Repo-Lage `cognee-setup/mcp/` (eigener Code im HiMeS-Repo, nicht `vendor/`-Subtree wie caldav-mcp), weil Code minimal und MVP-fokussiert ist. T2 (Cognee komplett in Bot-Container) verworfen wegen Image-Bloat. T3 (Hybrid stdio-Wrapper + FastAPI-Layer) verworfen wegen zwei Komponenten ohne Mehrwert gegenüber T1. Bind auf `127.0.0.1` (Loopback-only) als Default im Server-Konstruktor — Caddy macht TLS-Termination. | Aktiv |
+| 048 | Cognee-MCP Konfiguration via COGNEE_MCP_*-Env-Vars statt Click-CLI (Phase 2.1 Schritt 7, 2026-04-27): `cognee-setup/mcp/server.py` nutzt `mcp.run(transport=os.getenv("COGNEE_MCP_TRANSPORT", "sse"))` mit Host/Port aus `COGNEE_MCP_HOST` / `COGNEE_MCP_PORT` (Defaults `127.0.0.1` / `8002`). Begründung: (1) namespaced — kein Konflikt mit `FASTMCP_*`-Globals des SDKs, falls künftig weitere FastMCP-Server im selben Prozess-Raum laufen; (2) 1:1 zum systemd-Idiom (`Environment=` in der Unit-Datei), keine separate CLI-Argumentparsing nötig; (3) folgt `himes_db`-Pattern (kein Click). caldav-mcp nutzt Click — das Cognee-Skelett ist bewusst schlanker, weil weniger Optionen nötig. Defaults sind in der Unit-Datei via `Environment=` überschreibbar (z.B. für Test-Deployments auf anderem Port). | Aktiv |
+| 049 | Tool-Whitelist auf Server-Prefix-Ebene bestätigt (Phase 2.1 Schritt 7, 2026-04-27): `_ALLOWED_TOOLS` in `core/sdk_client.py` enthält `"mcp__cognee"` als Server-Prefix, NICHT `"mcp__cognee__cognee_search"` als vollqualifizierter Tool-Name. Konsistent mit existing Einträgen (`mcp__caldav`, `mcp__deutsche-bahn`, `mcp__himes-tools`, etc.) — der Inline-Kommentar im Code erklärt das Pattern explizit: „Server-Level-Prefixe laden ALLE Tools des jeweiligen MCP-Servers — kein Hardcoding einzelner Tool-Namen, robust gegen neue Tools". Strikte Read-Only-Trennung wird stattdessen am Server selbst durchgesetzt: Cognee-MVP exposed nur `cognee_search`, Schreib-Operationen (`cognee_ingest`) bleiben über die Pipeline (Phase 2.1 Schritt 6) und sind im MCP-Server gar nicht registriert. Falls künftig strikte Tool-Allowlist pro Server gewünscht wird, kann der Eintrag jederzeit auf den Voll-Namen umgestellt werden — bewusst nicht jetzt, weil das den existing Stil bricht und für den MVP keinen Mehrwert bringt. | Aktiv |
 
 ---
 
@@ -1385,6 +1410,12 @@ Sporadischer Bot-Deadlock — Belegfall 25./26.04.2026 mit ~14h Stille. Async-Ge
 
 **ANTHROPIC_API_KEY auf VPS doppelt gesetzt** (Phase 2.1, Schritt 1)
 Debug-Artefakt aus Cognee-Installation. Cognee braucht nur `LLM_API_KEY`; `ANTHROPIC_API_KEY` ist redundant. Optional aufräumen wenn gewünscht. Migriert hierher 2026-04-26 aus Phase 2.1 „Bekannte technische Schuld".
+
+**MCP-Config Render-Pattern schreibt Secrets in versionierte Datei** (Phase 2.1 Schritt 7, 2026-04-27)
+`core/orchestrator.py:_render_mcp_config()` ersetzt `${VAR}`-Placeholder in `config/mcp_config.json` mit `os.environ`-Werten und schreibt das Ergebnis ZURÜCK in dieselbe Datei. Konsequenz: auf VPS ist `mcp_config.json` permanent „modified" gegenüber `main`, weil sie Live-Tokens enthält. Beim `git pull` blockt das, falls Mac-seitige Änderungen an dieser Datei mitkommen — entdeckt während Phase 2.1 Schritt 7, weil dort der `cognee`-Eintrag in der Datei mitgepullt werden musste. Workaround: `git checkout -- config/mcp_config.json` vor Pull (sicher, weil Bot beim nächsten Start neu rendert aus `os.environ`). Zusätzliches Risiko: wer auf VPS unbedacht `git add . && git commit` macht, würde Live-Tokens (Notion, DB-API) committen — heute nur durch Stage-2-Disziplin verhindert. Saubere Lösung für später: Renderer schreibt nach `/tmp/mcp_config.rendered.json`, SDK-Client liest von dort statt von der versionierten Source-Datei. Hardcoded-Liste der Substitutionen aktuell auf 3 Variablen (NOTION_TOKEN, DB_API_CLIENT_ID, DB_API_CLIENT_SECRET) — bei künftigen Servern mit `${VAR}`-Bedarf erweitern.
+
+**FastMCP HTTP 421 hinter Reverse-Proxy ohne Host-Rewrite** (Phase 2.1 Schritt 7, 2026-04-27)
+FastMCP/uvicorn (mcp-SDK 1.27.0) lehnt Requests mit `Host`-Header `!= 127.0.0.1` mit HTTP 421 Misdirected Request ab, wenn der Server auf `127.0.0.1` gebunden ist. Caddy reicht standardmäßig den Original-Host weiter (`cognee-ahsan.duckdns.org`), was zum 421 führt. Fix: `header_up Host {upstream_hostport}` im Caddy-`reverse_proxy`-Block — überschreibt den Host-Header zu `127.0.0.1:8002`, FastMCP akzeptiert. Pattern-Notiz für künftige FastMCP-Server hinter Caddy. caldav-mcp ist nicht betroffen (anderes/permissiveres Host-Check-Verhalten — vermutlich weil dort Starlette/MCP-low-level statt FastMCP benutzt wird).
 
 ---
 
