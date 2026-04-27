@@ -45,6 +45,13 @@
         "DB_API_CLIENT_ID": "${DB_API_CLIENT_ID}",
         "DB_API_CLIENT_SECRET": "${DB_API_CLIENT_SECRET}"
       }
+    },
+    "cognee": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://cognee-ahsan.duckdns.org/sse"
+      ]
     }
   }
 }
