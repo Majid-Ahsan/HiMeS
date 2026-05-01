@@ -52,6 +52,13 @@
         "mcp-remote",
         "https://cognee-ahsan.duckdns.org/sse"
       ]
+    },
+    "daily-log": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://daily-log-ahsan.duckdns.org/sse"
+      ]
     }
   }
 }
