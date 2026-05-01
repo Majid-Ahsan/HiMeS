@@ -116,24 +116,51 @@ def test_task_verb_infinitive():
     assert ("task_verb", "kaufen") in _types_values(result)
 
 
-def test_task_verb_conjugated():
-    result = hints.extract_hints("Ich kaufte gestern Brot.")
-    # Stem "kaufen" matched "kaufte" via \bkaufen\w* — eigentlich nicht.
-    # Aber der Test soll bestehen via stem "kauf"... wait — TASK_VERB_STEMS
-    # hat "kaufen", nicht "kauf". \bkaufen\w* matched nicht "kaufte".
-    # Hier zeigt der Test die Schuld-Linie der Stem-Liste.
-    # Der spec-konforme Weg: zusätzlicher Stem "kauft" oder generischeres "kauf".
-    # Wir akzeptieren das aktuell als Limitation und passen den Test an.
-    # → see test below: kaufte_is_not_matched_acknowledged
-    pass
-
-
-def test_task_verb_kaufte_is_not_matched_acknowledged():
-    """Aktuelle Stem-Liste hat 'kaufen', nicht 'kauf' — 'kaufte' wird NICHT
-    matched. Dokumentiert die Schuld-Linie für Liste-Erweiterung."""
+def test_task_verb_kaufte_matched():
+    """Mit kauf-Stem matched 'kaufte', 'gekauft', 'Einkauf' alle."""
     result = hints.extract_hints("Ich kaufte gestern Brot.")
     task_verbs = [v for t, v in _types_values(result) if t == "task_verb"]
-    assert task_verbs == []  # Bewusst leer — Stem-Liste deckt das nicht ab.
+    assert "kaufte" in task_verbs
+
+
+@pytest.mark.parametrize("text,expected_match", [
+    ("Habe gestern eingekauft.", "eingekauft"),
+    ("Ich rief Reza an.", "rief"),
+    ("Habe ihn angerufen.", "angerufen"),
+    ("Der Einkauf war lang.", "Einkauf"),
+    ("Heute geprüft.", "geprüft"),
+    ("Den Termin abgesagt.", "abgesagt"),
+    ("Pakete abgeholt.", "abgeholt"),
+    ("Bezahlt habe ich gestern.", "Bezahlt"),
+])
+def test_task_verb_extended_forms(text, expected_match):
+    """Generalisierte Stems matchen Partizipien, Konjugationen, Substantive."""
+    result = hints.extract_hints(text)
+    matches = [v for t, v in _types_values(result) if t == "task_verb"]
+    assert expected_match in matches
+
+
+def test_task_verb_acknowledged_false_positives():
+    """Generischere Stems erzeugen erwartete False-Positives.
+    Bot filtert beim Formulieren."""
+    result = hints.extract_hints("Eine kaufmännische Aufgabe.")
+    task_verbs = [h for h in result if h["type"] == "task_verb"]
+    assert task_verbs  # nicht-leer — kaufmännisch via kauf-Stem
+
+
+def test_task_verb_abgeb_not_match_geben():
+    """abgeb-Stem matcht NICHT 'geben', 'gibt', 'gegeben' alleine.
+    (Test-Text vermeidet bewusst 'Buch', das via buch-Stem matchen würde.)"""
+    result = hints.extract_hints("Er gibt es ihm. Sie hat es gegeben.")
+    task_verbs = [h for h in result if h["type"] == "task_verb"]
+    assert task_verbs == []
+
+
+def test_task_verb_uberweis():
+    """überweis-Stem deckt Verb- und Substantiv-Form ab."""
+    result = hints.extract_hints("Habe die Überweisung gestern gemacht.")
+    matches = [v for t, v in _types_values(result) if t == "task_verb"]
+    assert "Überweisung" in matches
 
 
 def test_task_verb_einkauf_noun_form():

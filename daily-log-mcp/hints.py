@@ -49,20 +49,27 @@ RELATIVE_DATES_COMPOUND = [
 ]
 
 TASK_VERB_STEMS = [
-    "anrufen", "rufen",
-    "kaufen", "einkauf",
-    "bezahlen", "überweis",
-    "buchen", "reservier",
-    "schicken", "senden", "schreib",
-    "abholen", "holen",
-    "bringen",
-    "termin",
-    "erinner",
-    "fragen",
-    "checken", "prüfen",
-    "bestellen",
-    "abgeben",
-    "absagen",
+    "ruf",        # rufen, anrufen, gerufen, angerufen, Anruf
+    "rief",       # rief (Präteritum von rufen, irreguläre Form)
+    "kauf",       # kaufen, kaufte, gekauft, einkaufen, Einkauf
+    "zahl",       # bezahlen, zahlte, Zahlung, Bezahlt
+    "überweis",   # überweisen, überwies, Überweisung
+    "buch",       # buchen, gebucht, Buchung
+    "reservier",  # reservieren, reserviert, Reservierung
+    "schick",     # schicken, schickte, geschickt
+    "send",       # senden, sandte, gesendet
+    "schreib",    # schreiben, schrieb, geschrieben
+    "hol",        # holen, holte, geholt, abholen, Abholung, abgeholt
+    "bring",      # bringen, gebracht (kein "brach" — zu kollidierend)
+    "termin",     # Termin (Substantiv-Hinweis)
+    "erinner",    # erinnern, erinnerte, Erinnerung
+    "frag",       # fragen, fragte, gefragt
+    "check",      # checken (Englisch-Lehnwort)
+    "prüf",       # prüfen, prüfte, geprüft
+    "bestell",    # bestellen, bestellt, Bestellung
+    "abgeb",      # abgeben, abgegeben (NICHT "geb" — zu generisch)
+    "absag",      # absagen, sagte ab, Absage
+    "abgesag",    # abgesagt (ge-Einschub im Partizip — eigener Stem nötig)
 ]
 
 # Großgeschriebene Wörter, die fast nie Eigennamen sind.
@@ -201,11 +208,21 @@ def _extract_dates(text: str) -> list[dict]:
 
 
 def _extract_task_verbs(text: str) -> list[dict]:
+    """Stem darf irgendwo innerhalb eines Wortes stehen.
+
+    Pattern \\b\\w*<stem>\\w*\\b matched das ganze Wort, das den Stem
+    irgendwo enthält — nicht nur am Wort-Anfang. Damit deckt z.B. der
+    kauf-Stem auch "eingekauft" und "Einkauf" ab. value im Hint ist
+    das vollständige umgebende Wort.
+
+    Akzeptierte False-Positives: "kaufmännisch" (kauf), "Anzahl" (zahl),
+    "Holz" (hol). Bot filtert beim Formulieren.
+    """
     out: list[dict] = []
     for stem in TASK_VERB_STEMS:
-        # \b<stem>\w* — Wort-Grenze nur am Anfang, freier Suffix.
-        # IGNORECASE, damit "Einkauf" via Stem "einkauf" matched.
-        pattern = re.compile(r"\b" + re.escape(stem) + r"\w*", re.IGNORECASE)
+        pattern = re.compile(
+            r"\b\w*" + re.escape(stem) + r"\w*\b", re.IGNORECASE
+        )
         for m in pattern.finditer(text):
             out.append(_hint(
                 "task_verb", m.group(0), m.start(),
