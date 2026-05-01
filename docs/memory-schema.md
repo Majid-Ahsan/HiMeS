@@ -55,7 +55,7 @@ Daten-Verzeichnis (außerhalb Git, im Folgenden `<data-dir>`). Cognee
 indexiert diese Dateien in einen Knowledge Graph für schnelle,
 semantische Suche.
 
-`<data-dir>` wird vom Voice-Memo-Mapper (`pipeline/voice_to_md.py`),
+`<data-dir>` wird vom Memo-Mapper (`pipeline/memo_to_md.py`),
 vom Cognee-Ingest (`pipeline/ingest_to_cognee.py`) und von Cognee in
 dieser Reihenfolge bestimmt:
 1. `--data-dir`-Argument (falls gesetzt)

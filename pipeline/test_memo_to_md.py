@@ -1,4 +1,4 @@
-"""Tests für pipeline.voice_to_md.
+"""Tests für pipeline.memo_to_md.
 
 Alle Tests arbeiten in tmp_path — niemals im echten ~/himes-data/.
 """
@@ -14,7 +14,7 @@ import pytest
 # Ensure pipeline/ is importable when pytest is run from repo root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pipeline import voice_to_md  # noqa: E402
+from pipeline import memo_to_md  # noqa: E402
 
 
 def _run(args: list[str], stdin_text: str | None = None) -> int:
@@ -24,7 +24,7 @@ def _run(args: list[str], stdin_text: str | None = None) -> int:
     else:
         stdin = io.StringIO(stdin_text)
         stdin.isatty = lambda: False  # type: ignore[method-assign]
-    return voice_to_md.main(args, stdin=stdin)
+    return memo_to_md.main(args, stdin=stdin)
 
 
 def _path(tmp_path: Path, date: str, user: str) -> Path:

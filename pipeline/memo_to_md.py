@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Voice-Memo-zu-Markdown Mapper für HiMeS Daily-Logs.
+"""Memo-zu-Markdown Mapper für HiMeS Daily-Logs.
 
 Liest Text-Input (Stdin / --file / --text) und schreibt ihn nach
 <data-dir>/memory/daily-logs/<YYYY-MM-DD>_<user>.md im Daily-Log-Format
@@ -29,7 +29,7 @@ USER_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="voice_to_md",
+        prog="memo_to_md",
         description="Schreibe Text-Input als Daily-Log-Markdown.",
     )
     src = parser.add_mutually_exclusive_group()
