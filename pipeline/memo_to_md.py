@@ -148,8 +148,18 @@ def resolve_data_dir(arg: str | None) -> Path:
     return Path(DEFAULT_DATA_DIR).expanduser()
 
 
-def daily_log_path(data_dir: Path, date: str, user: str) -> Path:
-    return data_dir / "memory" / "daily-logs" / f"{date}_{user}.md"
+def daily_log_path(
+    date: str,
+    user: str = DEFAULT_USER,
+    data_dir: str | os.PathLike | None = None,
+) -> Path:
+    """Konstruiert den Pfad zur Daily-Log-Datei für gegebenes Datum + User.
+
+    Auflösung von data_dir: arg → $HIMES_DATA_DIR → ~/himes-data
+    (gleiches Pattern wie resolve_data_dir(); siehe auch ADR-050 D4).
+    """
+    base = resolve_data_dir(str(data_dir) if data_dir is not None else None)
+    return base / "memory" / "daily-logs" / f"{date}_{user}.md"
 
 
 def build_frontmatter(
@@ -228,8 +238,7 @@ def write_memo(
     user = validate_user(user)
     norm_tags = normalize_list(tags, "tags")
     norm_entities = normalize_list(entities, "entities")
-    base = resolve_data_dir(data_dir)
-    path = daily_log_path(base, date, user)
+    path = daily_log_path(date, user, data_dir)
 
     path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -561,3 +561,24 @@ def test_write_memo_default_date_is_today(tmp_path):
     )
     today = datetime.now(memo_to_md.TIMEZONE).strftime("%Y-%m-%d")
     assert f"{today}_majid.md" in result["file_path"]
+
+
+# ── ADR-050 D9: daily_log_path() helper für Server-Reuse ────────────────────
+
+
+def test_daily_log_path_construction(tmp_path):
+    result = memo_to_md.daily_log_path(
+        "2026-04-30", "majid", data_dir=str(tmp_path)
+    )
+    assert result == tmp_path / "memory" / "daily-logs" / "2026-04-30_majid.md"
+
+
+def test_daily_log_path_uses_env_when_data_dir_none(tmp_path, monkeypatch):
+    monkeypatch.setenv("HIMES_DATA_DIR", str(tmp_path))
+    result = memo_to_md.daily_log_path("2026-04-30", "majid")
+    assert result == tmp_path / "memory" / "daily-logs" / "2026-04-30_majid.md"
+
+
+def test_daily_log_path_default_user(tmp_path):
+    result = memo_to_md.daily_log_path("2026-04-30", data_dir=str(tmp_path))
+    assert result.name == "2026-04-30_majid.md"
