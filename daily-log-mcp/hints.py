@@ -72,6 +72,22 @@ TASK_VERB_STEMS = [
     "abgesag",    # abgesagt (ge-Einschub im Partizip — eigener Stem nötig)
 ]
 
+# Wörter, die einen Task-Verb-Stem enthalten, aber semantisch keine
+# Tasks anzeigen. Case-sensitive (deutsche Substantive sind groß,
+# konsistent mit COMMON_NOUNS_DE). Gefiltert nach erfolgreichem
+# Stem-Match in _extract_task_verbs.
+TASK_VERB_FALSE_POSITIVES = {
+    # hol-Stem
+    "Holz", "Holzfäller", "Wiederholung", "Wiederholungen",
+    # zahl-Stem (Numerisches, kein Task)
+    "Anzahl", "Mehrzahl", "Zahl", "Zahlen", "Zahlenwert",
+    # bring-Stem (semantisch andere Verben)
+    "verbringen", "verbracht", "verbringt", "verbringe",
+    "erbringen", "erbracht", "erbringt", "Erbringung",
+    # buch-Stem (Substantiv-Kollisionen)
+    "Buch", "Bücher", "Büchern", "Buchstabe", "Buchstaben",
+}
+
 # Großgeschriebene Wörter, die fast nie Eigennamen sind.
 COMMON_NOUNS_DE = {
     # Familie
@@ -224,8 +240,11 @@ def _extract_task_verbs(text: str) -> list[dict]:
             r"\b\w*" + re.escape(stem) + r"\w*\b", re.IGNORECASE
         )
         for m in pattern.finditer(text):
+            word = m.group(0)
+            if word in TASK_VERB_FALSE_POSITIVES:
+                continue
             out.append(_hint(
-                "task_verb", m.group(0), m.start(),
+                "task_verb", word, m.start(),
                 _context_snippet(text, m.start(), m.end()),
             ))
     return out

@@ -156,6 +156,40 @@ def test_task_verb_abgeb_not_match_geben():
     assert task_verbs == []
 
 
+@pytest.mark.parametrize("text,word", [
+    ("Wir haben Holz fürs Lagerfeuer", "Holz"),
+    ("Eine Wiederholung der Untersuchung", "Wiederholung"),
+    ("Die Anzahl der Patienten war hoch", "Anzahl"),
+    ("Mehrzahl statt Einzahl", "Mehrzahl"),
+    ("Eine Zahl auf dem Display", "Zahl"),
+    ("Wir haben den Tag verbracht", "verbracht"),
+    ("Die Erbringung der Leistung", "Erbringung"),
+    ("Ich lese ein Buch", "Buch"),
+    ("Drei Bücher auf dem Tisch", "Bücher"),
+])
+def test_task_verb_false_positives_filtered(text, word):
+    """Wörter mit Task-Verb-Stems, die semantisch keine Tasks sind,
+    werden gefiltert."""
+    result = hints.extract_hints(text)
+    task_values = [h["value"] for h in result if h["type"] == "task_verb"]
+    assert word not in task_values
+
+
+def test_task_verb_real_tasks_still_match():
+    """Sanity: Stop-Liste filtert nicht zu aggressiv."""
+    cases = [
+        ("Muss morgen einkaufen", "einkaufen"),
+        ("Habe Reza angerufen", "angerufen"),
+        ("Die Bezahlung steht aus", "Bezahlung"),
+        ("Termin abgesagt", "abgesagt"),
+        ("Pakete abgeholt", "abgeholt"),
+    ]
+    for text, expected in cases:
+        result = hints.extract_hints(text)
+        task_values = [h["value"] for h in result if h["type"] == "task_verb"]
+        assert expected in task_values, f"Failed for: {text!r} (got {task_values})"
+
+
 def test_task_verb_uberweis():
     """überweis-Stem deckt Verb- und Substantiv-Form ab."""
     result = hints.extract_hints("Habe die Überweisung gestern gemacht.")
