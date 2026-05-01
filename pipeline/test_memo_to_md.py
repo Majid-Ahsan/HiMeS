@@ -243,3 +243,182 @@ def test_success_output_mentions_path_and_action(tmp_path, capsys):
     _run([*args, "--text", "zweit", "--time", "12:00"])
     out_appended = capsys.readouterr().out
     assert "angehängt" in out_appended
+
+
+# ── ADR-050 D2: schema-compliant frontmatter + datums-anker ────────────────
+
+
+def test_datums_anker_first_body_line(tmp_path):
+    rc = _run(
+        [
+            "--data-dir", str(tmp_path),
+            "--date", "2026-04-30",
+            "--user", "majid",
+            "--text", "Memo-Inhalt.",
+        ],
+    )
+    assert rc == 0
+    content = _path(tmp_path, "2026-04-30", "majid").read_text()
+    _, body = content.split("---\n", 2)[1:]
+    body_lines = [ln for ln in body.split("\n") if ln.strip()]
+    assert body_lines[0] == "Heute ist Donnerstag, der 30. April 2026."
+
+
+@pytest.mark.parametrize(
+    "iso_date,expected_weekday",
+    [
+        ("2026-04-27", "Montag"),
+        ("2026-04-28", "Dienstag"),
+        ("2026-04-29", "Mittwoch"),
+        ("2026-04-30", "Donnerstag"),
+        ("2026-05-01", "Freitag"),
+        ("2026-05-02", "Samstag"),
+        ("2026-05-03", "Sonntag"),
+    ],
+)
+def test_datums_anker_wochentag(tmp_path, iso_date, expected_weekday):
+    rc = _run(
+        [
+            "--data-dir", str(tmp_path),
+            "--date", iso_date,
+            "--user", "majid",
+            "--text", "x",
+        ],
+    )
+    assert rc == 0
+    content = _path(tmp_path, iso_date, "majid").read_text()
+    assert f"Heute ist {expected_weekday}, der" in content
+
+
+@pytest.mark.parametrize(
+    "iso_date,expected_month,expected_day",
+    [
+        ("2026-01-15", "Januar", "15"),
+        ("2026-03-08", "März", "8"),
+        ("2026-07-04", "Juli", "4"),
+        ("2026-12-31", "Dezember", "31"),
+    ],
+)
+def test_datums_anker_monat(tmp_path, iso_date, expected_month, expected_day):
+    rc = _run(
+        [
+            "--data-dir", str(tmp_path),
+            "--date", iso_date,
+            "--user", "majid",
+            "--text", "x",
+        ],
+    )
+    assert rc == 0
+    content = _path(tmp_path, iso_date, "majid").read_text()
+    assert f", der {expected_day}. {expected_month} 2026." in content
+
+
+def test_tags_serialization(tmp_path):
+    rc = _run(
+        [
+            "--data-dir", str(tmp_path),
+            "--date", "2026-04-30", "--user", "majid",
+            "--tags", "arbeit,familie,gesundheit",
+            "--text", "x",
+        ],
+    )
+    assert rc == 0
+    content = _path(tmp_path, "2026-04-30", "majid").read_text()
+    assert "tags: [arbeit, familie, gesundheit]" in content
+
+
+def test_entities_serialization(tmp_path):
+    rc = _run(
+        [
+            "--data-dir", str(tmp_path),
+            "--date", "2026-04-30", "--user", "majid",
+            "--entities", "majid,neda,taha",
+            "--text", "x",
+        ],
+    )
+    assert rc == 0
+    content = _path(tmp_path, "2026-04-30", "majid").read_text()
+    assert "entities: [majid, neda, taha]" in content
+
+
+def test_tags_lowercase_normalization_and_dedupe(tmp_path):
+    rc = _run(
+        [
+            "--data-dir", str(tmp_path),
+            "--date", "2026-04-30", "--user", "majid",
+            "--tags", " Arbeit , FAMILIE, arbeit ,Arbeit",
+            "--text", "x",
+        ],
+    )
+    assert rc == 0
+    content = _path(tmp_path, "2026-04-30", "majid").read_text()
+    assert "tags: [arbeit, familie]" in content
+
+
+def test_tags_empty_omitted(tmp_path):
+    rc = _run(
+        [
+            "--data-dir", str(tmp_path),
+            "--date", "2026-04-30", "--user", "majid",
+            "--text", "x",
+        ],
+    )
+    assert rc == 0
+    content = _path(tmp_path, "2026-04-30", "majid").read_text()
+    assert "tags:" not in content
+    assert "entities:" not in content
+
+
+def test_tags_empty_string_omitted(tmp_path):
+    rc = _run(
+        [
+            "--data-dir", str(tmp_path),
+            "--date", "2026-04-30", "--user", "majid",
+            "--tags", "  ,  ,",
+            "--text", "x",
+        ],
+    )
+    assert rc == 0
+    content = _path(tmp_path, "2026-04-30", "majid").read_text()
+    assert "tags:" not in content
+
+
+def test_tags_german_umlauts_allowed(tmp_path):
+    rc = _run(
+        [
+            "--data-dir", str(tmp_path),
+            "--date", "2026-04-30", "--user", "majid",
+            "--tags", "gemüse,straße,übung",
+            "--text", "x",
+        ],
+    )
+    assert rc == 0
+    content = _path(tmp_path, "2026-04-30", "majid").read_text()
+    assert "tags: [gemüse, straße, übung]" in content
+
+
+def test_invalid_tag_chars_rejected(tmp_path, capsys):
+    rc = _run(
+        [
+            "--data-dir", str(tmp_path),
+            "--date", "2026-04-30", "--user", "majid",
+            "--tags", "arbeit,foo bar",
+            "--text", "x",
+        ],
+    )
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "Ungültiges Zeichen" in err
+
+
+def test_invalid_entity_chars_rejected(tmp_path, capsys):
+    rc = _run(
+        [
+            "--data-dir", str(tmp_path),
+            "--date", "2026-04-30", "--user", "majid",
+            "--entities", "majid,foo@bar",
+            "--text", "x",
+        ],
+    )
+    assert rc == 1
+    assert "Ungültiges Zeichen" in capsys.readouterr().err
