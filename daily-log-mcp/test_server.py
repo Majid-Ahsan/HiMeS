@@ -63,7 +63,7 @@ def mock_extract_hints(monkeypatch):
 
 @pytest.fixture
 def mock_schedule_ingest(monkeypatch):
-    mock = MagicMock(return_value="scheduled")
+    mock = MagicMock(return_value={"status": "queued", "queue_position": 1})
     monkeypatch.setattr(srv.ingest, "schedule_ingest", mock)
     return mock
 
@@ -88,7 +88,8 @@ class TestLogDailyEntry:
             "ok": True,
             "file_path": "/tmp/daily/2026-04-30_majid.md",
             "action": "geschrieben",
-            "ingest_status": "scheduled",
+            "ingest_status": "queued",
+            "queue_position": 1,
             "extracted_hints": [],
         }
         mock_write_memo.assert_called_once_with(
@@ -119,7 +120,8 @@ class TestLogDailyEntry:
         )
         assert result["ok"] is True
         assert result["action"] == "überschrieben"
-        assert result["ingest_status"] == "scheduled"
+        assert result["ingest_status"] == "queued"
+        assert result["queue_position"] == 1
 
     async def test_value_error_returns_validation_dict(
         self, monkeypatch, mock_extract_hints, mock_schedule_ingest
@@ -288,3 +290,69 @@ class TestReadDailyLog:
         assert result["ok"] is False
         assert result["error"] == "ValueError"
         assert "Frontmatter" in result["detail"]
+
+
+# ─── list_failed_ingests / retry_failed_ingests ─────────────────────────
+
+
+class TestFailureTools:
+    async def test_list_failed_ingests_empty(self, monkeypatch):
+        monkeypatch.setattr(srv.ingest, "list_failed", MagicMock(return_value=[]))
+        result = await srv.list_failed_ingests()
+        assert result == {"ok": True, "failures": []}
+
+    async def test_list_failed_ingests_with_entries(self, monkeypatch):
+        sample = [
+            {
+                "file_path": "/x/2026-04-30_majid.md",
+                "error_type": "TimeoutError",
+                "error_detail": "ingest timeout",
+                "timestamp": "2026-05-01T14:23:11+00:00",
+                "retry_count": 0,
+            }
+        ]
+        monkeypatch.setattr(srv.ingest, "list_failed", MagicMock(return_value=sample))
+        result = await srv.list_failed_ingests()
+        assert result["ok"] is True
+        assert result["failures"] == sample
+
+    async def test_list_failed_ingests_error_returns_adr018(self, monkeypatch):
+        monkeypatch.setattr(
+            srv.ingest, "list_failed", MagicMock(side_effect=OSError("disk gone"))
+        )
+        result = await srv.list_failed_ingests()
+        assert result["ok"] is False
+        assert result["error"] == "OSError"
+        assert result["user_message_hint"] == "Konnte Failure-Liste nicht lesen."
+
+    async def test_retry_failed_specific_file(self, monkeypatch):
+        from unittest.mock import AsyncMock
+        retry_mock = AsyncMock(
+            return_value={"retried": 1, "queued": ["/x/2026-04-30_majid.md"]}
+        )
+        monkeypatch.setattr(srv.ingest, "retry_failed", retry_mock)
+        result = await srv.retry_failed_ingests("/x/2026-04-30_majid.md")
+        assert result == {
+            "ok": True,
+            "retried": 1,
+            "queued": ["/x/2026-04-30_majid.md"],
+        }
+        retry_mock.assert_called_once_with("/x/2026-04-30_majid.md")
+
+    async def test_retry_failed_all(self, monkeypatch):
+        from unittest.mock import AsyncMock
+        retry_mock = AsyncMock(return_value={"retried": 3, "queued": ["a", "b", "c"]})
+        monkeypatch.setattr(srv.ingest, "retry_failed", retry_mock)
+        result = await srv.retry_failed_ingests()
+        assert result["ok"] is True
+        assert result["retried"] == 3
+        retry_mock.assert_called_once_with(None)
+
+    async def test_retry_failed_error_returns_adr018(self, monkeypatch):
+        from unittest.mock import AsyncMock
+        monkeypatch.setattr(
+            srv.ingest, "retry_failed", AsyncMock(side_effect=RuntimeError("boom"))
+        )
+        result = await srv.retry_failed_ingests()
+        assert result["ok"] is False
+        assert result["error"] == "RuntimeError"
