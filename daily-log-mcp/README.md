@@ -15,8 +15,23 @@ dieser Server nicht im Bot-Container laufen.
 
 | Tool | Zweck |
 | --- | --- |
-| `log_daily_entry` | Bereinigten Daily-Log-Eintrag als MD speichern + Ingest planen. Modi `write` (fail bei existierender Datei) oder `replace`. Returnt `extracted_hints` für proaktive Vorschläge. |
+| `log_daily_entry` | Bereinigten Daily-Log-Eintrag als MD speichern + Ingest in Single-Queue legen (ADR-050 D8). Modi `write` (fail bei existierender Datei) oder `replace`. Returnt `extracted_hints`, `ingest_status="queued"`, `queue_position`. |
 | `read_daily_log` | Existierende MD-Datei für Merge-Workflow (ADR-050 D3) lesen. Returnt `exists: False` ohne Fehler, wenn keine Datei vorhanden. |
+| `list_failed_ingests` | Listet alle Daily-Logs, deren Cognee-Ingest fehlschlug. Tracking in `<data_dir>/memory/.failed_ingests.json`. |
+| `retry_failed_ingests` | Legt fehlgeschlagene Ingests neu in die Queue. Optional `file_path` für Einzel-Retry, sonst alle. Erhöht `retry_count` pro Aufruf. |
+
+## Async-Ingest
+
+`log_daily_entry` returnt sofort nach dem MD-Schreiben. `schedule_ingest` legt
+den Pfad in eine asyncio-Queue, ein Single-Worker arbeitet sie sequentiell ab
+(verhindert parallele `cognee.cognify`-Calls). Der Worker beendet sich nach
+60s Idle und wird beim nächsten `schedule_ingest` neu gespawnt. Jeder
+Ingest-Call ist mit `asyncio.wait_for(timeout=300)` gewrappt — deckt den
+158s worst-case des Cognee-Anthropic-Adapters (Memory-Note
+`cognee_anthropic_max_tokens_workaround`).
+
+Bei Fehler/Timeout/aborted: Eintrag in `.failed_ingests.json`, sichtbar via
+`list_failed_ingests`, retrybar via `retry_failed_ingests`.
 
 ## Run (lokal / manueller Smoke-Test)
 

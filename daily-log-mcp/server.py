@@ -27,6 +27,12 @@ from pipeline._cognee_env import load_cognee_env  # noqa: E402
 
 load_cognee_env()
 
+# Cognee top-level preloaden (ADR-044 + Inspektions-Report Schritt 4b E2):
+# der erste cognee-Import dauert mehrere Sekunden und würde sonst beim
+# ersten Tool-Aufruf den Event-Loop blockieren. Hier einmalig beim
+# MCP-Server-Start, danach ist process_files() im ingest-Worker schnell.
+import cognee  # noqa: E402, F401  -- preload, used indirectly via pipeline.ingest_to_cognee
+
 from pipeline.memo_to_md import (  # noqa: E402
     daily_log_path,
     parse_date,
@@ -35,7 +41,7 @@ from pipeline.memo_to_md import (  # noqa: E402
 )
 from mcp.server.fastmcp import FastMCP  # noqa: E402
 
-# Lokale Stub-Module (siehe hints.py / ingest.py).
+# Lokale Sub-Module (hints.py / ingest.py).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hints  # noqa: E402
 import ingest  # noqa: E402
@@ -51,6 +57,8 @@ mcp = FastMCP(
 _FRONTMATTER_LIST_RE = re.compile(r"^\[(.*)\]$")
 _HINT_WRITE = "Konnte Daily-Log nicht speichern."
 _HINT_READ = "Konnte Daily-Log nicht lesen."
+_HINT_FAILURES = "Konnte Failure-Liste nicht lesen."
+_HINT_RETRY = "Konnte Retry nicht ausführen."
 
 
 def _err(exc: Exception, hint: str, retry: bool) -> dict:
@@ -128,13 +136,14 @@ async def log_daily_entry(
         return _err(e, _HINT_WRITE, retry=True)
 
     extracted_hints = hints.extract_hints(text)
-    ingest_status = ingest.schedule_ingest(result["file_path"])
+    ingest_result = ingest.schedule_ingest(result["file_path"])
 
     return {
         "ok": True,
         "file_path": result["file_path"],
         "action": result["action"],
-        "ingest_status": ingest_status,
+        "ingest_status": ingest_result["status"],
+        "queue_position": ingest_result["queue_position"],
         "extracted_hints": extracted_hints,
     }
 
@@ -170,6 +179,34 @@ async def read_daily_log(date: str, user: str = "majid") -> dict:
         "frontmatter": fm,
         "body": body,
     }
+
+
+@mcp.tool(
+    description=(
+        "Listet Daily-Logs, deren Cognee-Ingest fehlgeschlagen ist. "
+        "Liefert für jeden Eintrag file_path, error_type, error_detail, "
+        "timestamp und retry_count."
+    )
+)
+async def list_failed_ingests() -> dict:
+    try:
+        return {"ok": True, "failures": ingest.list_failed()}
+    except Exception as e:
+        return _err(e, _HINT_FAILURES, retry=True)
+
+
+@mcp.tool(
+    description=(
+        "Retried fehlgeschlagene Cognee-Ingests. file_path optional — "
+        "ohne Argument werden alle Failures neu in die Queue gelegt."
+    )
+)
+async def retry_failed_ingests(file_path: str | None = None) -> dict:
+    try:
+        result = await ingest.retry_failed(file_path)
+        return {"ok": True, **result}
+    except Exception as e:
+        return _err(e, _HINT_RETRY, retry=True)
 
 
 if __name__ == "__main__":
