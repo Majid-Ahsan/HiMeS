@@ -168,8 +168,13 @@ async def read_daily_log(date: str, user: str = "majid") -> dict:
     try:
         content = path.read_text(encoding="utf-8")
         fm, body = _parse_frontmatter(content)
-    except (OSError, ValueError) as e:
-        return _err(e, _HINT_READ, retry=isinstance(e, OSError))
+    except OSError as e:
+        # IO-Problem (Disk, Permission, …) — Retry kann helfen.
+        return _err(e, _HINT_READ, retry=True)
+    except ValueError as e:
+        # Daten-Problem (kaputtes Frontmatter, Format) — Retry kann
+        # nichts ändern, User muss die Datei reparieren.
+        return _err(e, _HINT_READ, retry=False)
 
     return {
         "ok": True,

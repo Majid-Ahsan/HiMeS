@@ -290,6 +290,8 @@ class TestReadDailyLog:
         assert result["ok"] is False
         assert result["error"] == "ValueError"
         assert "Frontmatter" in result["detail"]
+        # Daten-Problem, kein IO — Retry kann nichts beheben.
+        assert result["retry_suggested"] is False
 
 
 # ─── list_failed_ingests / retry_failed_ingests ─────────────────────────
