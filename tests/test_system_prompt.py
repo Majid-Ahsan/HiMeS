@@ -56,3 +56,25 @@ def test_system_prompt_contains_routing_separation():
     """Daily-Log vs. Task-Abgrenzung muss im Prompt sein."""
     assert "NICHT Daily-Log" in SYSTEM_PROMPT
     assert "nachfragen" in SYSTEM_PROMPT.lower()
+
+
+def test_system_prompt_requires_read_before_write():
+    """ADR-050 D3: read_daily_log muss als Schritt 0 vor jeder
+    log_daily_entry-Aktion gefordert sein."""
+    assert "Schritt 0" in SYSTEM_PROMPT
+    assert "read_daily_log" in SYSTEM_PROMPT
+    lower = SYSTEM_PROMPT.lower()
+    assert "ohne vorheriges" in lower or "ohne read_daily_log" in lower
+
+
+def test_system_prompt_handles_read_failure():
+    """ADR-050 D3 + Edge-Case: read_daily_log-Failure muss explizit
+    behandelt werden, nicht auto-fallback."""
+    # Backticks im Source — Test prüft nur den semantischen Kern.
+    assert "selbst fehlschlägt" in SYSTEM_PROMPT
+    assert "read_daily_log" in SYSTEM_PROMPT
+    lower = SYSTEM_PROMPT.lower()
+    assert (
+        "soll ich trotzdem versuchen zu speichern" in lower
+        or "soll ich trotzdem speichern" in lower
+    )
