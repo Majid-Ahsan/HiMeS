@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -77,31 +78,11 @@ def test_text_argument_creates_file(tmp_path):
     assert "Direkt als Argument." in f.read_text()
 
 
-def test_append_wraps_first_entry_and_adds_header(tmp_path):
-    base_args = ["--data-dir", str(tmp_path), "--date", "2026-04-25", "--user", "majid"]
-    _run([*base_args, "--text", "Erster Eintrag."])
-    rc = _run([*base_args, "--time", "15:30", "--text", "Zweiter Eintrag."])
-    assert rc == 0
-
-    content = _path(tmp_path, "2026-04-25", "majid").read_text()
-    assert "## (Erster Eintrag)" in content
-    assert "Erster Eintrag." in content
-    assert "## 15:30" in content
-    assert "Zweiter Eintrag." in content
-    # Reihenfolge: Erster Eintrag-Block vor 15:30-Block
-    assert content.index("## (Erster Eintrag)") < content.index("## 15:30")
-
-
-def test_third_append_does_not_wrap_again(tmp_path):
-    base_args = ["--data-dir", str(tmp_path), "--date", "2026-04-25", "--user", "majid"]
-    _run([*base_args, "--text", "Erster."])
-    _run([*base_args, "--time", "15:30", "--text", "Zweiter."])
-    _run([*base_args, "--time", "20:00", "--text", "Dritter."])
-
-    content = _path(tmp_path, "2026-04-25", "majid").read_text()
-    assert content.count("## (Erster Eintrag)") == 1
-    assert "## 15:30" in content
-    assert "## 20:00" in content
+# ADR-050 D2 obsoleted append-tests:
+# - test_append_wraps_first_entry_and_adds_header
+# - test_third_append_does_not_wrap_again
+# Append-Logik mit `## HH:MM`-Stack und `## (Erster Eintrag)`-Wrap entfällt.
+# Multi-Memo-Merge passiert jetzt im Bot via Read+LLM-Merge (ADR-050 D3).
 
 
 def test_custom_user_is_respected(tmp_path):
@@ -236,13 +217,13 @@ def test_success_output_mentions_path_and_action(tmp_path, capsys):
     args = ["--data-dir", str(tmp_path), "--date", "2026-04-25", "--user", "majid"]
 
     _run([*args, "--text", "erst"])
-    out_created = capsys.readouterr().out
-    assert "neu erstellt" in out_created
-    assert str(_path(tmp_path, "2026-04-25", "majid")) in out_created
+    out_written = capsys.readouterr().out
+    assert "(geschrieben)" in out_written
+    assert str(_path(tmp_path, "2026-04-25", "majid")) in out_written
 
-    _run([*args, "--text", "zweit", "--time", "12:00"])
-    out_appended = capsys.readouterr().out
-    assert "angehängt" in out_appended
+    _run([*args, "--text", "neu", "--mode", "replace"])
+    out_replaced = capsys.readouterr().out
+    assert "(überschrieben)" in out_replaced
 
 
 # ── ADR-050 D2: schema-compliant frontmatter + datums-anker ────────────────
@@ -422,3 +403,161 @@ def test_invalid_entity_chars_rejected(tmp_path, capsys):
     )
     assert rc == 1
     assert "Ungültiges Zeichen" in capsys.readouterr().err
+
+
+# ── ADR-050 D2: write/replace modes ─────────────────────────────────────────
+
+
+def test_write_mode_new_file(tmp_path):
+    rc = _run(
+        [
+            "--data-dir", str(tmp_path),
+            "--date", "2026-04-30", "--user", "majid",
+            "--tags", "arbeit,familie",
+            "--entities", "majid,neda",
+            "--text", "Heute war ein langer Tag.",
+        ],
+    )
+    assert rc == 0
+    content = _path(tmp_path, "2026-04-30", "majid").read_text()
+    assert content.startswith(
+        "---\n"
+        "type: daily-log\n"
+        "date: 2026-04-30\n"
+        "user: majid\n"
+        "tags: [arbeit, familie]\n"
+        "entities: [majid, neda]\n"
+        "---\n"
+        "\n"
+        "Heute ist Donnerstag, der 30. April 2026.\n"
+        "\n"
+        "Heute war ein langer Tag.\n"
+    )
+
+
+def test_write_mode_existing_file_fails(tmp_path, capsys):
+    base = ["--data-dir", str(tmp_path), "--date", "2026-04-30", "--user", "majid"]
+    rc1 = _run([*base, "--text", "erst"])
+    assert rc1 == 0
+    capsys.readouterr()  # clear
+
+    rc2 = _run([*base, "--text", "zweit"])
+    assert rc2 == 1
+    err = capsys.readouterr().err
+    assert "Datei existiert bereits" in err
+    assert "--mode replace" in err
+
+    # Inhalt unverändert
+    content = _path(tmp_path, "2026-04-30", "majid").read_text()
+    assert "erst" in content
+    assert "zweit" not in content
+
+
+def test_replace_mode_overwrites(tmp_path):
+    base = ["--data-dir", str(tmp_path), "--date", "2026-04-30", "--user", "majid"]
+    _run([*base, "--text", "erste version"])
+    rc = _run([*base, "--text", "zweite version", "--mode", "replace"])
+    assert rc == 0
+
+    content = _path(tmp_path, "2026-04-30", "majid").read_text()
+    assert "zweite version" in content
+    assert "erste version" not in content
+
+
+def test_replace_mode_creates_when_missing(tmp_path):
+    rc = _run(
+        [
+            "--data-dir", str(tmp_path),
+            "--date", "2026-04-30", "--user", "majid",
+            "--mode", "replace",
+            "--text", "neu",
+        ],
+    )
+    assert rc == 0
+    assert _path(tmp_path, "2026-04-30", "majid").exists()
+
+
+def test_invalid_mode_rejected(tmp_path, capsys):
+    # argparse choices-violation → SystemExit(2)
+    with pytest.raises(SystemExit) as exc_info:
+        _run(
+            [
+                "--data-dir", str(tmp_path),
+                "--date", "2026-04-30", "--user", "majid",
+                "--mode", "append",
+                "--text", "x",
+            ],
+        )
+    assert exc_info.value.code == 2
+    assert "invalid choice: 'append'" in capsys.readouterr().err
+
+
+# ── ADR-050 D4: Python-API write_memo() ─────────────────────────────────────
+
+
+def test_write_memo_function_returns_dict(tmp_path):
+    result = memo_to_md.write_memo(
+        text="Direkter API-Aufruf.",
+        user="majid",
+        date="2026-04-30",
+        tags=["arbeit", "familie"],
+        entities=["majid", "neda"],
+        mode="write",
+        data_dir=str(tmp_path),
+    )
+    assert result == {
+        "ok": True,
+        "file_path": str(_path(tmp_path, "2026-04-30", "majid")),
+        "action": "geschrieben",
+    }
+    content = _path(tmp_path, "2026-04-30", "majid").read_text()
+    assert "Direkter API-Aufruf." in content
+
+
+def test_write_memo_replace_returns_überschrieben(tmp_path):
+    memo_to_md.write_memo(
+        text="erst", user="majid", date="2026-04-30",
+        mode="write", data_dir=str(tmp_path),
+    )
+    result = memo_to_md.write_memo(
+        text="zweit", user="majid", date="2026-04-30",
+        mode="replace", data_dir=str(tmp_path),
+    )
+    assert result["action"] == "überschrieben"
+    assert result["ok"] is True
+
+
+def test_write_memo_write_mode_raises_on_existing(tmp_path):
+    memo_to_md.write_memo(
+        text="erst", user="majid", date="2026-04-30",
+        mode="write", data_dir=str(tmp_path),
+    )
+    with pytest.raises(ValueError, match="Datei existiert bereits"):
+        memo_to_md.write_memo(
+            text="zweit", user="majid", date="2026-04-30",
+            mode="write", data_dir=str(tmp_path),
+        )
+
+
+def test_write_memo_invalid_mode_raises(tmp_path):
+    with pytest.raises(ValueError, match="Ungültiger Modus"):
+        memo_to_md.write_memo(
+            text="x", user="majid", date="2026-04-30",
+            mode="append", data_dir=str(tmp_path),
+        )
+
+
+def test_write_memo_empty_text_raises(tmp_path):
+    with pytest.raises(ValueError, match="leer"):
+        memo_to_md.write_memo(
+            text="   \n  ", user="majid", date="2026-04-30",
+            data_dir=str(tmp_path),
+        )
+
+
+def test_write_memo_default_date_is_today(tmp_path):
+    result = memo_to_md.write_memo(
+        text="x", user="majid", data_dir=str(tmp_path),
+    )
+    today = datetime.now(memo_to_md.TIMEZONE).strftime("%Y-%m-%d")
+    assert f"{today}_majid.md" in result["file_path"]

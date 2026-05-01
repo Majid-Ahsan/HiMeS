@@ -6,6 +6,13 @@ Liest Text-Input (Stdin / --file / --text) und schreibt ihn nach
 gemäß docs/memory-schema.md (MVP).
 
 Kein Audio, kein Whisper, kein Cognee — nur Text rein, Markdown raus.
+
+Modi (ADR-050 D2):
+- write   (Default): schreibt frisch, fail bei existierender Datei
+- replace: überschreibt existierende Datei vollständig
+
+Append-Logik wurde entfernt — mehrere Memos pro Tag werden vom Bot
+via Read+LLM-Merge zu kohärentem Fließtext verschmolzen (ADR-050 D3).
 """
 
 from __future__ import annotations
@@ -23,9 +30,9 @@ DEFAULT_USER = "majid"
 DEFAULT_DATA_DIR = "~/himes-data"
 DATA_DIR_ENV = "HIMES_DATA_DIR"
 TIMEZONE = ZoneInfo("Europe/Berlin")
-FIRST_ENTRY_HEADER = "## (Erster Eintrag)"
 USER_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 TAG_PATTERN = re.compile(r"^[a-zA-Z0-9_äöüÄÖÜß-]+$")
+VALID_MODES = ("write", "replace")
 
 WEEKDAYS_DE = [
     "Montag", "Dienstag", "Mittwoch", "Donnerstag",
@@ -47,7 +54,7 @@ def _build_parser() -> argparse.ArgumentParser:
     src.add_argument("--text", help="Memo-Text als Argument")
     parser.add_argument("--user", default=DEFAULT_USER, help=f"User-Identifier (Default: {DEFAULT_USER})")
     parser.add_argument("--date", help="Datum YYYY-MM-DD (Default: heute, Europe/Berlin)")
-    parser.add_argument("--time", help="Uhrzeit HH:MM für Multi-Memo-Header (Default: jetzt, Europe/Berlin)")
+    parser.add_argument("--time", help="Uhrzeit HH:MM (Default: jetzt, Europe/Berlin). Aktuell ohne Effekt auf Datei-Inhalt; reserviert für Voice-Phase 8b.")
     parser.add_argument("--data-dir", help=f"Output-Basispfad (Default: ${DATA_DIR_ENV} oder {DEFAULT_DATA_DIR})")
     parser.add_argument(
         "--tags",
@@ -56,6 +63,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--entities",
         help="Komma-separierte Entities/Personen (z.B. majid,neda,taha). Optional.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=VALID_MODES,
+        default="write",
+        help="write (Default): fail bei existierender Datei. replace: überschreibe.",
     )
     return parser
 
@@ -101,7 +114,7 @@ def validate_user(user: str) -> str:
 
 
 def normalize_list(raw: str | list[str] | None, kind: str) -> list[str]:
-    """Komma-Liste → normalisierte Items: lowercase, getrimmt, dedupe (Reihenfolge).
+    """Komma-Liste oder Liste → normalisierte Items: lowercase, getrimmt, dedupe.
 
     Wirft ValueError bei ungültigen Zeichen. Leere Strings werden ignoriert.
     """
@@ -167,58 +180,69 @@ def format_datums_anker(date_str: str) -> str:
     return f"Heute ist {weekday}, der {d.day}. {month} {d.year}."
 
 
-def _split_frontmatter(content: str) -> tuple[str, str]:
-    if not content.startswith("---\n"):
-        raise ValueError("Datei hat kein YAML-Frontmatter — kann nicht parsen.")
-    end = content.find("\n---\n", 4)
-    if end == -1:
-        raise ValueError("Frontmatter nicht abgeschlossen — kann nicht parsen.")
-    fm = content[: end + len("\n---\n")]
-    body = content[end + len("\n---\n") :]
-    return fm, body
-
-
-def _has_entry_headers(body: str) -> bool:
-    return any(line.startswith("## ") for line in body.splitlines())
-
-
-def write_log(
-    path: Path,
+def _render_file(
     date: str,
     user: str,
-    time: str,
     text: str,
+    tags: list[str],
+    entities: list[str],
+) -> str:
+    frontmatter = build_frontmatter(date, user, tags, entities)
+    anker = format_datums_anker(date)
+    return f"{frontmatter}\n{anker}\n\n{text}\n"
+
+
+def write_memo(
+    text: str,
+    user: str = DEFAULT_USER,
+    date: str | None = None,
     tags: list[str] | None = None,
     entities: list[str] | None = None,
-) -> str:
-    """Schreibe oder appende den Log. Gibt 'created' oder 'appended' zurück."""
+    mode: str = "write",
+    data_dir: str | None = None,
+) -> dict:
+    """Python-API für ADR-050 D4 (Direkt-Import durch daily-log-MCP).
+
+    Returns:
+        {"ok": True, "file_path": "<abs>", "action": "geschrieben"|"überschrieben"}
+
+    Raises:
+        ValueError: bei Validierungs-Fehlern oder existierender Datei in
+            write-Modus.
+        OSError: bei Schreib-/Filesystem-Fehlern.
+    """
+    if mode not in VALID_MODES:
+        raise ValueError(
+            f"Ungültiger Modus: {mode!r}. Erwartet einen von {VALID_MODES}."
+        )
+
     text = text.strip()
     if not text:
         raise ValueError("Kein Input erhalten (Text war leer).")
 
+    if date is None:
+        date = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
+    else:
+        date = parse_date(date)
+
+    user = validate_user(user)
+    norm_tags = normalize_list(tags, "tags")
+    norm_entities = normalize_list(entities, "entities")
+    base = resolve_data_dir(data_dir)
+    path = daily_log_path(base, date, user)
+
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    if not path.exists():
-        frontmatter = build_frontmatter(date, user, tags, entities)
-        anker = format_datums_anker(date)
-        path.write_text(f"{frontmatter}\n{anker}\n\n{text}\n", encoding="utf-8")
-        return "created"
+    if mode == "write" and path.exists():
+        raise ValueError(
+            f"Datei existiert bereits: {path}. Nutze --mode replace zum Überschreiben."
+        )
 
-    content = path.read_text(encoding="utf-8")
-    frontmatter, body = _split_frontmatter(content)
-    body = body.strip()
-    new_block = f"## {time}\n\n{text}"
+    content = _render_file(date, user, text, norm_tags, norm_entities)
+    action = "überschrieben" if (mode == "replace" and path.exists()) else "geschrieben"
+    path.write_text(content, encoding="utf-8")
 
-    if _has_entry_headers(body):
-        new_content = f"{frontmatter}\n{body}\n\n{new_block}\n"
-    elif body:
-        wrapped = f"{FIRST_ENTRY_HEADER}\n\n{body}"
-        new_content = f"{frontmatter}\n{wrapped}\n\n{new_block}\n"
-    else:
-        new_content = f"{frontmatter}\n{new_block}\n"
-
-    path.write_text(new_content, encoding="utf-8")
-    return "appended"
+    return {"ok": True, "file_path": str(path), "action": action}
 
 
 def main(argv: list[str] | None = None, stdin=sys.stdin) -> int:
@@ -226,17 +250,18 @@ def main(argv: list[str] | None = None, stdin=sys.stdin) -> int:
 
     try:
         text = read_input(args, stdin=stdin)
+        if args.time is not None:
+            parse_time(args.time)  # validate even if unused
 
-        now = datetime.now(TIMEZONE)
-        date = parse_date(args.date) if args.date else now.strftime("%Y-%m-%d")
-        time = parse_time(args.time) if args.time else now.strftime("%H:%M")
-        user = validate_user(args.user)
-        tags = normalize_list(args.tags, "tags")
-        entities = normalize_list(args.entities, "entities")
-        data_dir = resolve_data_dir(args.data_dir)
-        path = daily_log_path(data_dir, date, user)
-
-        action = write_log(path, date, user, time, text, tags, entities)
+        result = write_memo(
+            text=text,
+            user=args.user,
+            date=args.date,
+            tags=args.tags,
+            entities=args.entities,
+            mode=args.mode,
+            data_dir=args.data_dir,
+        )
     except ValueError as e:
         print(f"Fehler: {e}", file=sys.stderr)
         return 1
@@ -244,8 +269,7 @@ def main(argv: list[str] | None = None, stdin=sys.stdin) -> int:
         print(f"Schreib-Fehler: {e}", file=sys.stderr)
         return 1
 
-    label = "neu erstellt" if action == "created" else "angehängt"
-    print(f"{path} ({label})")
+    print(f"{result['file_path']} ({result['action']})")
     return 0
 
 
