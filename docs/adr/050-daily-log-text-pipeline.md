@@ -191,3 +191,20 @@ Read- und Write-Verantwortung.
   `cognee-setup/`) oder `pipeline/daily-log-mcp/`? Default: Top-Level.
 - Locking bei gleichzeitigen Schreibvorgängen — falls Bot mehrere
   Sessions parallel hat. Annahme MVP: single-user, irrelevant.
+
+## Update 2026-05-02 — D4 revidiert
+
+D4 ("Direct-Import von process_files in daily-log-MCP statt
+Subprocess") ist mit der bestehenden Two-Process-Cognee-Architektur
+strukturell unvereinbar. Kuzu (Cognee Graph-Backend) ist
+single-process-only via flock(2). Beide Cognee-Process-Instanzen
+streiten um exklusive Locks auf dieselben DB-Files.
+
+Fix-Strategie: D3 (Subprocess-Ingest, ursprünglich verworfen) wird
+re-aktiviert. asyncio.create_subprocess_exec() startet kurzlebigen
+Ingest-Process, Lock wird automatisch beim Process-Exit freigegeben.
+Trade-off: ~1-2s Spawn-Latenz pro Ingest, akzeptabel da Ingest
+ohnehin async im Hintergrund läuft.
+
+D4 bleibt im Repo als historischer Beleg, ist aber durch D3
+abgelöst — siehe Sektion 13a für vollständige Diagnose.
