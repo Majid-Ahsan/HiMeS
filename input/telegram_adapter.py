@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import tempfile
+from functools import partial
 from pathlib import Path
 from typing import Callable, Awaitable
 from uuid import uuid4
@@ -23,6 +24,11 @@ from telegram.ext import (
 from config.settings import settings
 from input.media_parser import parse_response, ParsedResponse, MediaItem, InlineButton
 from input.voice_post_process import post_process_voice_response
+from input.whisper_config import (
+    WHISPER_INITIAL_PROMPT,
+    WHISPER_LANGUAGE,
+    WHISPER_MODEL,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -485,19 +491,25 @@ class TelegramAdapter:
         """Lazy-load and cache whisper model."""
         if self._whisper_model is None:
             import whisper
-            logger.info("telegram.whisper_loading")
-            self._whisper_model = whisper.load_model("base")
+            logger.info("telegram.whisper_loading", model=WHISPER_MODEL)
+            self._whisper_model = whisper.load_model(WHISPER_MODEL)
             logger.info("telegram.whisper_loaded")
         return self._whisper_model
 
     async def _transcribe_audio(self, filepath: str) -> str | None:
         try:
             model = self._get_whisper_model()
-            # Run CPU-bound transcription in thread pool to avoid blocking event loop
+            # Run CPU-bound transcription in thread pool to avoid blocking event loop.
+            # functools.partial weil run_in_executor keine kwargs durchreicht.
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None, model.transcribe, filepath
+            transcribe_call = partial(
+                model.transcribe,
+                filepath,
+                language=WHISPER_LANGUAGE,
+                initial_prompt=WHISPER_INITIAL_PROMPT,
+                fp16=False,
             )
+            result = await loop.run_in_executor(None, transcribe_call)
             return result.get("text", "").strip() or None
         except Exception:
             logger.exception("telegram.transcription_failed")
