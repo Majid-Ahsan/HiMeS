@@ -168,7 +168,7 @@ class TelegramAdapter:
             await update.message.reply_text("Konnte Audio nicht transkribieren.")
             return
 
-        await self._process_and_reply(update, user_id, transcript)
+        await self._process_and_reply(update, user_id, f"[🎤 Voice-Transkript]: {transcript}")
 
     async def _handle_photo(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
