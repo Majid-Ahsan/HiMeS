@@ -208,3 +208,26 @@ ohnehin async im Hintergrund läuft.
 
 D4 bleibt im Repo als historischer Beleg, ist aber durch D3
 abgelöst — siehe Sektion 13a für vollständige Diagnose.
+
+## Update 2026-05-03 — D3 implementiert + verifiziert
+
+PR #14 (commit 0480fe1) hat D3 (Subprocess-basierter Ingest)
+implementiert. End-to-End-Verifikation mit echtem Tagebuch-Eintrag
+am 2026-05-03:
+
+- Tagebuch-Eintrag 2026-04-21 (2580 Zeichen, viele Personen + Themen)
+- Schritt 0 (read_daily_log) → Bereinigung → Preview → Speichern
+- log_daily_entry triggert subprocess-basierten Ingest
+- Subprocess endet nach ~6 Sekunden mit "Ingest done" auf stdout
+- Lock auf Kuzu-DB wird via Process-Exit automatisch freigegeben
+- Cognee-Search findet den Eintrag ~30-60s später (Index-Lag) ohne
+  irgendeinen Service-Restart
+
+Damit ist ADR-050 D3 vs. D4 final entschieden: D3 ist die korrekte
+Architektur für daily-log-MCP-Ingest. D4 (Direct-Import) bleibt im
+historischen Repo-Stand für Kontext, ist aber durch D3 in Code
+abgelöst.
+
+Trade-off bestätigt akzeptabel: ~6s Subprocess-Spawn-Latenz pro
+Ingest, irrelevant da Ingest async im Hintergrund läuft. User merkt
+nur die ~5-10s Speichern-Bestätigung, nicht die Subprocess-Lifetime.
