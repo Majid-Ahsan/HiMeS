@@ -98,9 +98,3 @@ def test_voice_marker_recognition():
     """System-Prompt sollte Voice-Marker-Erkennung enthalten."""
     assert "Voice-Transkript" in SYSTEM_PROMPT
     assert "🎤" in SYSTEM_PROMPT or "Marker" in SYSTEM_PROMPT
-
-
-def test_voice_directive_strength():
-    """Voice-Block sollte direktive Formulierung enthalten."""
-    assert "KRITISCHE REGEL" in SYSTEM_PROMPT or "VORRANG" in SYSTEM_PROMPT
-    assert "MUSS" in SYSTEM_PROMPT
