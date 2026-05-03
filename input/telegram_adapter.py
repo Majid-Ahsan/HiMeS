@@ -22,6 +22,7 @@ from telegram.ext import (
 
 from config.settings import settings
 from input.media_parser import parse_response, ParsedResponse, MediaItem, InlineButton
+from input.voice_post_process import post_process_voice_response
 
 logger = structlog.get_logger(__name__)
 
@@ -168,7 +169,12 @@ class TelegramAdapter:
             await update.message.reply_text("Konnte Audio nicht transkribieren.")
             return
 
-        await self._process_and_reply(update, user_id, f"[🎤 Voice-Transkript]: {transcript}")
+        await self._process_and_reply(
+            update,
+            user_id,
+            f"[🎤 Voice-Transkript]: {transcript}",
+            voice_transcript=transcript,
+        )
 
     async def _handle_photo(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -276,6 +282,7 @@ class TelegramAdapter:
         user_id: int,
         text: str,
         attachments: list[str] | None = None,
+        voice_transcript: str | None = None,
     ) -> None:
         stop_typing = asyncio.Event()
         typing_task = asyncio.create_task(
@@ -284,6 +291,10 @@ class TelegramAdapter:
         try:
             response = await self._on_message(user_id, text, attachments)
             parsed = parse_response(response)
+            if voice_transcript:
+                parsed.text = post_process_voice_response(
+                    parsed.text, voice_transcript
+                )
             await self._send_parsed_response(update.message, parsed)
         except Exception:
             logger.exception("telegram.reply_failed", user_id=user_id)
