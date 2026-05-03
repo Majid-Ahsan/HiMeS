@@ -231,3 +231,7 @@ abgelöst.
 Trade-off bestätigt akzeptabel: ~6s Subprocess-Spawn-Latenz pro
 Ingest, irrelevant da Ingest async im Hintergrund läuft. User merkt
 nur die ~5-10s Speichern-Bestätigung, nicht die Subprocess-Lifetime.
+
+Beobachtete Schuld bei der Verifikation: Cognee-LLM-Halluzination
+(Bug 4 in MASTER-REFERENCE Sektion 13a) beim Graph-Build — separat
+zu adressieren, nicht D3-bezogen.
