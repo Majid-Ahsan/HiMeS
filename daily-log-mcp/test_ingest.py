@@ -1,8 +1,8 @@
 """Tests für daily-log-mcp/ingest.py.
 
-Mocks an der pipeline.ingest_to_cognee.process_files-Boundary (lazy
-import in _do_ingest), keine echte Cognee-Operation. Worker- und
-Queue-Verhalten via asyncio.
+Mocks an der _run_ingest_subprocess-Boundary (Subprocess-Pattern nach
+ADR-050 D4-Revision), keine echte Cognee-Operation und kein echter
+Subprocess-Spawn. Worker- und Queue-Verhalten via asyncio.
 
 Konvention: Tests im selben Verzeichnis wie der Code.
 """
@@ -11,10 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import json
-import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -43,19 +40,31 @@ def _reset_and_isolate(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def mock_process_files(monkeypatch):
-    """Mockt pipeline.ingest_to_cognee.process_files via sys.modules-Stub.
+def mock_subprocess(monkeypatch):
+    """Mockt _run_ingest_subprocess für deterministische Tests.
 
-    process_files wird in _do_ingest lazy importiert. Wir registrieren
-    ein Stub-Modul in sys.modules damit der Import den Mock liefert.
+    Default: returncode=0, leeres stdout/stderr (= Erfolg). Tests
+    überschreiben state["returncode"]/["stderr"] für Fehler-Pfade
+    oder ersetzen die Funktion ganz (z.B. für Timeout/Exception).
+
+    state["calls"] sammelt alle file_paths zur Reihenfolge-Verifikation.
     """
-    pipeline_pkg = MagicMock()
-    sub = MagicMock()
-    mock = AsyncMock(return_value={"counts": {"new": 1}, "total": 1, "aborted": False})
-    sub.process_files = mock
-    pipeline_pkg.ingest_to_cognee = sub
-    monkeypatch.setitem(sys.modules, "pipeline.ingest_to_cognee", sub)
-    return mock
+    state = {
+        "calls": [],
+        "returncode": 0,
+        "stdout": "",
+        "stderr": "",
+        "delay": 0.0,
+    }
+
+    async def fake_run(file_path):
+        state["calls"].append(file_path)
+        if state["delay"]:
+            await asyncio.sleep(state["delay"])
+        return (state["returncode"], state["stdout"], state["stderr"])
+
+    monkeypatch.setattr(ingest, "_run_ingest_subprocess", fake_run)
+    return state
 
 
 async def _drain_worker(timeout: float = 2.0) -> None:
@@ -105,20 +114,20 @@ class TestFailureFile:
 
 
 class TestSchedule:
-    async def test_returns_queued_status(self, mock_process_files):
+    async def test_returns_queued_status(self, mock_subprocess):
         result = ingest.schedule_ingest("/tmp/file1.md")
         assert result == {"status": "queued", "queue_position": 1}
         await _drain_worker()
 
-    async def test_queue_position_increments(self, mock_process_files):
-        # Block process_files damit Items in der Queue stehen bleiben.
+    async def test_queue_position_increments(self, monkeypatch, mock_subprocess):
+        # Block subprocess damit Items in der Queue stehen bleiben.
         gate = asyncio.Event()
 
-        async def slow(*args, **kwargs):
+        async def slow(file_path):
             await gate.wait()
-            return {"counts": {}, "total": 1, "aborted": False}
+            return (0, "", "")
 
-        mock_process_files.side_effect = slow
+        monkeypatch.setattr(ingest, "_run_ingest_subprocess", slow)
 
         r1 = ingest.schedule_ingest("/tmp/a.md")
         r2 = ingest.schedule_ingest("/tmp/b.md")
@@ -137,25 +146,27 @@ class TestSchedule:
         gate.set()
         await _drain_worker()
 
-    async def test_worker_processes_sequentially(self, mock_process_files):
+    async def test_worker_processes_sequentially(self, monkeypatch, mock_subprocess):
         active = 0
         max_active = 0
+        call_count = 0
 
-        async def tracker(*args, **kwargs):
-            nonlocal active, max_active
+        async def tracker(file_path):
+            nonlocal active, max_active, call_count
+            call_count += 1
             active += 1
             max_active = max(max_active, active)
             await asyncio.sleep(0.02)
             active -= 1
-            return {"counts": {}, "total": 1, "aborted": False}
+            return (0, "", "")
 
-        mock_process_files.side_effect = tracker
+        monkeypatch.setattr(ingest, "_run_ingest_subprocess", tracker)
 
         for i in range(3):
             ingest.schedule_ingest(f"/tmp/{i}.md")
 
         await _drain_worker(timeout=5.0)
-        assert mock_process_files.call_count == 3
+        assert call_count == 3
         assert max_active == 1, f"Worker lief parallel (max_active={max_active})"
 
 
@@ -163,8 +174,9 @@ class TestSchedule:
 
 
 class TestFailureRecording:
-    async def test_recorded_on_exception(self, mock_process_files):
-        mock_process_files.side_effect = RuntimeError("boom")
+    async def test_recorded_on_subprocess_failure(self, mock_subprocess):
+        mock_subprocess["returncode"] = 1
+        mock_subprocess["stderr"] = "boom from cognee"
 
         ingest.schedule_ingest("/tmp/fail.md")
         await _drain_worker()
@@ -173,18 +185,19 @@ class TestFailureRecording:
         assert len(failures) == 1
         assert failures[0]["file_path"] == "/tmp/fail.md"
         assert failures[0]["error_type"] == "RuntimeError"
-        assert "boom" in failures[0]["error_detail"]
+        assert "boom from cognee" in failures[0]["error_detail"]
+        assert "returncode=1" in failures[0]["error_detail"]
         assert failures[0]["retry_count"] == 0
 
-    async def test_recorded_on_timeout(self, mock_process_files, monkeypatch):
+    async def test_recorded_on_timeout(self, monkeypatch):
         # Sehr kurzer Timeout, damit der Test schnell läuft.
         monkeypatch.setattr(ingest, "INGEST_TIMEOUT_SECONDS", 0.05)
 
-        async def hang(*args, **kwargs):
+        async def hang(file_path):
             await asyncio.sleep(5)
-            return {}
+            return (0, "", "")
 
-        mock_process_files.side_effect = hang
+        monkeypatch.setattr(ingest, "_run_ingest_subprocess", hang)
 
         ingest.schedule_ingest("/tmp/timeout.md")
         await _drain_worker(timeout=2.0)
@@ -193,10 +206,13 @@ class TestFailureRecording:
         assert len(failures) == 1
         assert failures[0]["error_type"] == "TimeoutError"
 
-    async def test_recorded_on_aborted_result(self, mock_process_files):
-        mock_process_files.return_value = {
-            "counts": {"new": 0}, "total": 1, "aborted": True,
-        }
+    async def test_recorded_on_nonzero_returncode(self, mock_subprocess):
+        # Variante zu test_recorded_on_subprocess_failure: deckt explizit
+        # den "process_files aborted" Fall aus dem alten Verhalten ab —
+        # subprocess endet mit returncode=1 wenn ingest_to_cognee.main
+        # `aborted=True` returnt.
+        mock_subprocess["returncode"] = 1
+        mock_subprocess["stderr"] = "Cognee-Aufruf fehlgeschlagen"
 
         ingest.schedule_ingest("/tmp/aborted.md")
         await _drain_worker()
@@ -204,30 +220,28 @@ class TestFailureRecording:
         failures = ingest.list_failed()
         assert len(failures) == 1
         assert failures[0]["error_type"] == "RuntimeError"
-        assert "aborted" in failures[0]["error_detail"]
+        assert "Cognee" in failures[0]["error_detail"]
 
-    async def test_failure_removed_on_success(self, mock_process_files):
+    async def test_failure_removed_on_success(self, mock_subprocess):
         # Vorbedingung: Failure existiert
         ingest._record_failure("/tmp/recovers.md", RuntimeError("old fail"))
         assert len(ingest.list_failed()) == 1
 
-        # Mock returnt jetzt Erfolg
-        mock_process_files.return_value = {
-            "counts": {"new": 1}, "total": 1, "aborted": False,
-        }
+        # Mock returnt jetzt Erfolg (returncode=0 ist Default)
         ingest.schedule_ingest("/tmp/recovers.md")
         await _drain_worker()
 
         assert ingest.list_failed() == []
 
-    async def test_failure_updated_not_duplicated_on_repeat(self, mock_process_files):
-        mock_process_files.side_effect = RuntimeError("first")
+    async def test_failure_updated_not_duplicated_on_repeat(self, mock_subprocess):
+        mock_subprocess["returncode"] = 1
+        mock_subprocess["stderr"] = "first"
 
         ingest.schedule_ingest("/tmp/repeat.md")
         await _drain_worker()
         assert len(ingest.list_failed()) == 1
 
-        mock_process_files.side_effect = RuntimeError("second")
+        mock_subprocess["stderr"] = "second"
         ingest.schedule_ingest("/tmp/repeat.md")
         await _drain_worker()
 
@@ -242,13 +256,14 @@ class TestFailureRecording:
 
 
 class TestRetry:
-    async def test_retry_specific_increments_count(self, mock_process_files):
+    async def test_retry_specific_increments_count(self, mock_subprocess):
         # Vorbereitung: zwei Failures.
         ingest._record_failure("/tmp/a.md", RuntimeError("a"))
         ingest._record_failure("/tmp/b.md", RuntimeError("b"))
 
-        # process_files schlägt weiter fehl, damit retry_count bestand hat.
-        mock_process_files.side_effect = RuntimeError("still failing")
+        # Subprocess schlägt weiter fehl, damit retry_count bestand hat.
+        mock_subprocess["returncode"] = 1
+        mock_subprocess["stderr"] = "still failing"
 
         result = await ingest.retry_failed("/tmp/a.md")
         await _drain_worker()
@@ -259,10 +274,11 @@ class TestRetry:
         assert failures["/tmp/a.md"]["retry_count"] == 1
         assert failures["/tmp/b.md"]["retry_count"] == 0
 
-    async def test_retry_all(self, mock_process_files):
+    async def test_retry_all(self, mock_subprocess):
         ingest._record_failure("/tmp/a.md", RuntimeError("a"))
         ingest._record_failure("/tmp/b.md", RuntimeError("b"))
-        mock_process_files.side_effect = RuntimeError("still")
+        mock_subprocess["returncode"] = 1
+        mock_subprocess["stderr"] = "still"
 
         result = await ingest.retry_failed()
         await _drain_worker()
@@ -272,7 +288,7 @@ class TestRetry:
         for f in ingest.list_failed():
             assert f["retry_count"] == 1
 
-    async def test_retry_unknown_file_returns_zero(self, mock_process_files):
+    async def test_retry_unknown_file_returns_zero(self, mock_subprocess):
         ingest._record_failure("/tmp/known.md", RuntimeError("x"))
         result = await ingest.retry_failed("/tmp/unknown.md")
         assert result["retried"] == 0
