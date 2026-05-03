@@ -92,3 +92,9 @@ def test_voice_transcript_format_present():
     """Transkript-Format-Anweisung sollte im System-Prompt sein."""
     assert "Transkript" in SYSTEM_PROMPT
     assert "kursiv" in SYSTEM_PROMPT.lower() or "_" in SYSTEM_PROMPT
+
+
+def test_voice_marker_recognition():
+    """System-Prompt sollte Voice-Marker-Erkennung enthalten."""
+    assert "Voice-Transkript" in SYSTEM_PROMPT
+    assert "🎤" in SYSTEM_PROMPT or "Marker" in SYSTEM_PROMPT
