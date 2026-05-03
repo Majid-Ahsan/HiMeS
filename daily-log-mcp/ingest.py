@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -113,35 +114,52 @@ def _remove_failure(file_path: str) -> bool:
 # ─── Worker + Queue ──────────────────────────────────────────────────────
 
 
+async def _run_ingest_subprocess(file_path: Path) -> tuple[int, str, str]:
+    """Führt pipeline/ingest_to_cognee.py als Subprocess aus.
+
+    Subprocess-Pattern statt Direct-Import vermeidet Kuzu-Lock-Konflikt
+    zwischen daily-log-MCP und cognee-MCP (siehe ADR-050 D4-Revision):
+    Kuzu nutzt flock(2) und ist single-process-only — der Subprocess
+    endet nach Ingest, der Lock wird via Process-Exit freigegeben.
+
+    Returns (returncode, stdout, stderr).
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    script_path = repo_root / "pipeline" / "ingest_to_cognee.py"
+
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        str(script_path),
+        "--file", str(file_path),
+        "--yes",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout_bytes, stderr_bytes = await proc.communicate()
+    return (
+        proc.returncode or 0,
+        stdout_bytes.decode("utf-8", errors="replace"),
+        stderr_bytes.decode("utf-8", errors="replace"),
+    )
+
+
 async def _do_ingest(file_path: str) -> None:
     """Echte Ingest-Operation. Bei Erfolg failure entfernen, sonst
     aufzeichnen. Wirft selbst keine Exception nach außen (Worker-safe).
     """
-    # Lazy-Import: process_files braucht cognee. cognee ist beim
-    # MCP-Server-Start einmalig top-level importiert (server.py),
-    # darum kein Latenz-Hit hier.
-    from pipeline.ingest_to_cognee import process_files
-
     p = Path(file_path)
     try:
-        result = await asyncio.wait_for(
-            process_files(
-                files=[p],
-                data_dir=_data_dir(),
-                yes_flag=True,
-                dry_run=False,
-                prompt_func=lambda _msg: True,
-            ),
+        returncode, stdout, stderr = await asyncio.wait_for(
+            _run_ingest_subprocess(p),
             timeout=INGEST_TIMEOUT_SECONDS,
         )
-        if result.get("aborted"):
+        if returncode != 0:
             raise RuntimeError(
-                f"process_files aborted: counts={result.get('counts')}"
+                f"Ingest subprocess failed (returncode={returncode}): "
+                f"stderr={stderr[:500]}"
             )
-        logger.info(
-            "Ingest done: %s — counts=%s",
-            file_path, result.get("counts"),
-        )
+        logger.info("Ingest done: %s", file_path)
+        logger.debug("Ingest subprocess stdout (%s): %s", file_path, stdout[:1000])
         _remove_failure(file_path)
     except asyncio.TimeoutError as e:
         logger.error(
